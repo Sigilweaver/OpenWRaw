@@ -52,9 +52,9 @@ record per PROC file (one "processed spectrum" per file).
 | 0x07   | u8   | 0x00 |
 | 0x08   | u32  | Hardware counter; pairs at same RT share high 2 bytes |
 | 0x0C   | f32  | Retention time of the processed spectrum (minutes) |
-| 0x10   | f32  | Unknown |
-| 0x12   | u16  | Unknown; small for fixed-size type, large for variable-size type |
-| 0x14   | u16  | Unknown |
+| 0x10   | u16  | Scan-varying count (13945-27076 in WANG corpus); purpose unclear; may be a peak count or hardware reference |
+| 0x12   | u16  | Small for fixed-size type (738-741 in corpus), large for variable-size (21680-50355); purpose unclear |
+| 0x14   | u16  | Same value for PROC pairs at identical RT; differs between RT points (34646-56336 in corpus); may be a scan-level TIC or hardware register |
 | 0x16   | u32  | DAT byte offset (always 0; each PROC has its own .DAT file) |
 | 0x1A   | u32  | 0 |
 

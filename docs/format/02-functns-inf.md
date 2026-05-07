@@ -98,8 +98,10 @@ Polarity cannot be confirmed from the available corpus (all positive-mode data).
   value 18 = "TofMS" but cannot be confirmed without non-TOF corpus data)
 - Byte 0x017 purpose (polarity vs data format flag)
 - Bytes 0x012-0x013, 0x014-0x016, 0x018-0x01B (all zero in corpus)
-- IMS-specific parameters (wave velocity, bias voltages) not found in this record;
-  those are stored in `_extern.inf` only
+- IMS-specific method parameters (wave velocity, trap bias, transfer bias) are not
+  present in this record. They do not appear in `_extern.inf` either. These values
+  are likely stored in a proprietary instrument method file outside the `.raw`
+  directory and are not recoverable from the raw data alone.
 
 ## Reference Sources
 

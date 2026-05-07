@@ -3,9 +3,10 @@
 Binary scan index file. One file per function (e.g. _FUNC001.IDX,
 _FUNC002.IDX). Provides random access into the paired .DAT file.
 
-## Status: Partially Decoded (Phase 2)
+## Status: Mostly Decoded (Phase 4)
 
-Two record sizes observed, corresponding to two DAT encoding schemes.
+Core structure and all critical access fields are confirmed. A few instrument-state
+fields remain without a confirmed interpretation.
 
 ## Variant A: 22-byte record (non-IMS / simple TOF-MS)
 
@@ -19,14 +20,25 @@ Key facts:
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
 | 0x00   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x04   | u32  | No        | Function/type code (0x18000002 for empty, varies for data scans) |
-| 0x08   | f32  | No        | Base peak intensity or TIC (0 for blank scans) |
+| 0x04   | u32  | **Yes**   | `(0x1800 << 16) \| n_records`: lower 16 bits = DAT record count for this scan; upper 16 bits = 0x1800 (constant type/format code) |
+| 0x08   | f32  | Partial   | Non-zero for data scans, 0 for blank scans. Correlates with scan signal level but no confirmed formula. |
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
-| 0x10   | u16  | No        | Centroid peak count (0 for blank, ~17-137 per scan) |
-| 0x12   | u16  | No        | Unknown |
-| 0x14   | u16  | No        | Unknown |
+| 0x10   | u16  | **Yes**   | Centroid peak count (0 for blank scans, 17-196 per data scan in corpus) |
+| 0x12   | u16  | No        | Hardware register; varies over run (62496→34848 in corpus); purpose unknown |
+| 0x14   | u16  | No        | Hardware register; slow drift (~38446-38468 in corpus); purpose unknown |
 
 Validated: 22 x 197 = 4334 bytes (molecular_mass_P15_01.raw), 22 x 426 = 9372 bytes (MS_fragmentation_P29_01.raw)
+
+### Field +0x04: Packed type-code and record count
+
+Format: `(0x1800 << 16) | n_records`.
+
+The lower 16 bits equal the number of 6-byte records in the paired .DAT scan (confirmed
+196/196 non-final scans in PXD058812). For blank scans (scan 0-2), n_records = 2.
+The upper 16 bits are always 0x1800 (= 6144), serving as an encoding type marker.
+
+This means `n_records = u32@0x04 & 0xFFFF` gives an alternative way to read the scan's
+record count without computing the difference between consecutive DAT offsets.
 
 ## Variant B: 30-byte record (IMS / HDMS and non-IMS QTof)
 
@@ -46,11 +58,11 @@ Key facts:
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
 | 0x00   | u32  | No        | Flags (always 0 in tested datasets) |
-| 0x04   | u32  | Partial   | Hardware tick counter (scan duration); see note below |
-| 0x08   | u32  | Partial   | Hardware counter, scan-varying; see note below |
+| 0x04   | u32  | **Yes**   | Hardware scan-duration counter; see note below |
+| 0x08   | u32  | Partial   | Hardware event counter; scan-varying; see note below |
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
-| 0x10   | f32  | No        | Varies; could be base peak m/z |
-| 0x14   | u16  | No        | Small value, purpose unknown |
+| 0x10   | u32  | No        | 4-byte field; interpreted as f32 gives scan-varying values (~18577 in WANG) but some scans have non-physical f32 garbage; purpose unclear |
+| 0x14   | u16  | No        | Hardware register; large values (35124-65208 in WANG); purpose unknown |
 | 0x16   | u32  | **Yes**   | Byte offset into .DAT file |
 | 0x1A   | u32  | No        | Always 0 in tested datasets |
 
@@ -95,8 +107,11 @@ before per-scan intensity processing.
 
 ## Fields Under Investigation
 
-- Variant A: encoding of +0x04 function/type field
-- Variant B: +0x04 clock-rate confirmation (800 MHz assumed); +0x08 TDC/TIC encoding
+- Variant A: exact formula for +0x08 f32 (confirmed non-zero for data scans; correlated with TIC but no clean factor)
+- Variant A: +0x12 and +0x14 hardware register semantics
+- Variant B: +0x04 clock-rate confirmation (800 MHz assumed)
+- Variant B: +0x08 raw TDC hit count vs processed intensity relationship
+- Variant B: +0x10 4-byte field type and semantics
 - Whether a 32-byte variant exists for other instrument generations
 
 ## Reference Sources

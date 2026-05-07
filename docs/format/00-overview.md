@@ -23,8 +23,8 @@ method, calibration state, and all acquired spectra.
 | `_INLET.INF` | ASCII text | **Fully known** | ACE inlet method record (LC runs only) |
 | `_HISTORY.INF` | Binary | Partially decoded | Waters PT with 0 descriptors; data opaque |
 | `_PROCnnn.DAT/IDX/STS` | Binary | Partially decoded | Post-processed IMS-MS peak data (IMS runs only) |
-| `APEXnnnD.BIN` | Binary | Undocumented | Apex3D IMS peak-detection output (IMS only) |
-| `APEXnnnDIONS.CSV` | CSV | Undocumented | Apex3D ion list (IMS only) |
+| `APEXnnnD.BIN` | Binary | Container decoded | Multi-section binary; ASCII command-line params + binary peak data (PeakEx not decoded) |
+| `APEXnnnDIONS.CSV` | CSV | **Fully known** | Apex3D ion list: m/z, RT, intensity, drift time per detected 3D peak |
 
 Files without a number suffix appear once per `.raw` directory. Files with
 `nnn` are numbered 001–099, one per MS function.
@@ -55,9 +55,9 @@ Three distinct record encodings have been observed in `_FUNCnnn.DAT`:
 | B | 8 bytes | Variant B (30-byte IDX) | SYNAPT G2-Si IMS | zero(u16), count(u16), dt_bin(u16), tof_bin(u16) |
 | C | 8 bytes | Variant B (30-byte IDX) | Xevo G2-XS QTof | zero(u16), count(u16), sub_bin(u16), tof_bin(u16) |
 
-Encoding B (IMS) uses a proprietary compound coordinate in bytes 4–7 that
-encodes both drift time and TOF bin in an undecoded packing. Encodings A
-and C are fully decodable to m/z using the T1 calibration polynomial.
+All three encodings are fully decoded. Encodings A, B, and C are decodable to
+m/z and (for Encoding B) IMS drift time using formulas derived from `_extern.inf`,
+`_FUNCTNS.INF`, and the T1 calibration polynomial.
 
 ## IDX Variants
 
@@ -72,10 +72,10 @@ presence of `APEXnnnD.BIN` or `APEXnnnDIONS.CSV` is the reliable IMS indicator.
 
 ## m/z Decoding Summary
 
-For Encodings A and C (decodable):
+All three encodings are fully decodable to m/z. Encoding B additionally yields IMS drift time.
 
 ```
-# Common to both:
+# Common to all:
 A_us   = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6  # from _extern.inf
 mz     = (t_cal_us / A_us)^2
 t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial, _HEADER.TXT
@@ -85,6 +85,15 @@ t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial, _HEADER
 #   sentinel.tof_bin = max TOF bin corresponding to mz_high.
 t_bin_us   = A_us * sqrt(mz_high) / sentinel_tof_bin  # bin width in microseconds
 t_raw_us   = tof_bin * t_bin_us
+
+# Encoding B (8-byte, SYNAPT G2-Si IMS):
+#   bytes[2:4]=count(u16), bytes[4:6]=dt_bin(u16), bytes[6:8]=tof_bin(u16)
+#   tof_bin_low/high from first/last record of scan (sentinel if count=0, else first hit).
+t_low_us   = A_us * sqrt(mz_low)
+t_high_us  = A_us * sqrt(mz_high)
+t_bin_us   = (t_high_us - t_low_us) / (tof_bin_high - tof_bin_low)
+t_raw_us   = t_low_us + (tof_bin - tof_bin_low) * t_bin_us
+drift_ms   = dt_bin * scan_time_ms / 65536  # scan_time_ms from _FUNCTNS.INF
 
 # Encoding C (8-byte, Xevo G2-XS):
 #   First record = sentinel at mz_low_bin, last = sentinel at mz_high_bin.
