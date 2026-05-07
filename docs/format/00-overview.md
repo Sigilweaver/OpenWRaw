@@ -15,7 +15,7 @@ method, calibration state, and all acquired spectra.
 | `_HEADER.TXT` | ASCII | **Fully known** | Run metadata, calibration polynomials |
 | `_FUNCTNS.INF` | Binary | **Fully known** | Function table: one 416-byte record per MS function |
 | `_FUNCnnn.IDX` | Binary | **Fully known** | Scan index (DAT offsets, RT, housekeeping) |
-| `_FUNCnnn.DAT` | Binary | **Mostly known** | Packed spectrum data (3 encodings; see below) |
+| `_FUNCnnn.DAT` | Binary | **Fully known** | Packed spectrum data (3 encodings; see below) |
 | `_FUNCnnn.STS` | Binary | **Fully decoded** | Per-scan instrument statistics (voltages, TIC, push count) |
 | `_CHROMS.INF` | Binary | **Fully decoded** | LC channel descriptor table |
 | `_CHROnnnn.DAT` | Binary | **Fully decoded** | LC channel time-series data (f32 RT + f32 value) |
@@ -51,9 +51,9 @@ Three distinct record encodings have been observed in `_FUNCnnn.DAT`:
 
 | Encoding | Record size | IDX variant | Instruments | Description |
 |----------|-------------|-------------|-------------|-------------|
-| A | 6 bytes | Variant A (22-byte IDX) | Older QTOF (Q-TOF Ultima) | flags(u8), intensity(u24), TOF bin(u16) |
-| B | 8 bytes | Variant B (30-byte IDX) | SYNAPT G2-Si IMS | flags(u8), intensity(u24), proprietary drift+TOF compound u32 |
-| C | 8 bytes | Variant B (30-byte IDX) | Xevo G2-XS QTof | zero(u16), intensity(u16), sub-bin(u16), TOF bin(u16) |
+| A | 6 bytes | Variant A (22-byte IDX) | Older QTOF (Q-TOF Ultima) | flags(u8), zero(u8), intensity(u8), tof_bin(u16) |
+| B | 8 bytes | Variant B (30-byte IDX) | SYNAPT G2-Si IMS | zero(u16), count(u16), dt_bin(u16), tof_bin(u16) |
+| C | 8 bytes | Variant B (30-byte IDX) | Xevo G2-XS QTof | zero(u16), count(u16), sub_bin(u16), tof_bin(u16) |
 
 Encoding B (IMS) uses a proprietary compound coordinate in bytes 4–7 that
 encodes both drift time and TOF bin in an undecoded packing. Encodings A

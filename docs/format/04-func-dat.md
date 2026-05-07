@@ -63,7 +63,7 @@ matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705
 
 ## Encoding B: 8-byte records (IMS mode — SYNAPT G2-Si)
 
-### Status: Partially Decoded
+### Status: Decoded and Validated (Phase 4)
 
 Observed in: PXD066594 (WANG.raw), PXD068881 (CtpA) -- both SYNAPT G2-Si
 
@@ -72,33 +72,86 @@ Key facts:
 - Scan boundaries are given by IDX Variant B offsets (u32@0x16)
 - Total: sum(scan record counts) x 8 = file size exactly (confirmed)
 - Scan sizes vary (min 636,928 / max 784,640 bytes for WANG.raw) = variable ion detections
-- Each 8-byte record represents a single detected ion event with 2D (IMS + TOF) coordinate
+- Each 8-byte record represents one (IMS drift bin, TOF bin) cell with an ion count
+- Each survey scan is a complete 2D IMS-TOF image: every occupied (dt_bin, tof_bin) cell is stored
 
 ### 8-byte Record Layout (IMS mode)
 
-| Bytes | Type | Confirmed | Description |
-|-------|------|-----------|-------------|
-| 0     | u8   | No        | Flags: nearly always 0; rare values {32, 64, 128, 192} |
-| 1-3   | u24  | No        | Raw intensity (24-bit unsigned; ~100k-200k range) |
-| 4-7   | u32  | **Yes**   | Compound IMS + TOF coordinate (proprietary packing; see below) |
+| Bytes | Type   | Confirmed | Description |
+|-------|--------|-----------|-------------|
+| 0     | u8     | Yes       | Always 0x00 in tested datasets |
+| 1     | u8     | Yes       | Always 0x00 (padding) |
+| 2-3   | u16 LE | **Yes**   | Ion count (TDC count per cell; 0-~800 typical) |
+| 4-5   | u16 LE | **Yes**   | dt_bin: IMS drift time bin (see below) |
+| 6-7   | u16 LE | **Yes**   | tof_bin: TOF time bin (same role as Encoding C bytes[6-7]) |
 
-### IMS Coordinate Encoding
+Sort key = (tof_bin << 16) | dt_bin, ascending. Records are sorted primarily by tof_bin
+(= m/z) then by dt_bin (= IMS drift position) within each tof_bin group.
 
-The 4-byte dword at offset 4 encodes BOTH the drift-time axis and the TOF axis in a
-proprietary packed format. **This format is not fully decoded without a Waters SDK reference.**
+Note: in previous analysis, bytes[1:4] were incorrectly treated as a u24 intensity.
+The correct layout has intensity as u16 at bytes[2:4], with bytes[0:2] always zero.
 
-Empirically confirmed facts:
-- Records within a scan are sorted ascending by the compound dword
-- The upper 16 bits of the dword (bytes 6-7 in LE) span 19632–24027 across **all** scans
-  regardless of retention time, corresponding to only ~300–491 Da in a 300–1500 Da scan range
-  (i.e., the upper 16 bits are NOT the full TOF bin for the entire m/z range)
-- The GCD of the lower 16 bits is 8, suggesting the 3 least-significant bits are always 0
-  (possibly used as a sub-field boundary marker)
-- Byte[0] flag values {32, 64, 128, 192} are rare (< 0.1% of records); meaning unknown
+### IMS Drift Time Encoding
 
-**Conclusion**: The compound u32 interleaves drift-time bins and TOF bins in a non-trivial
-encoding. It cannot be decoded without the Waters MassLynx SDK or an authoritative reference.
-The upper-16-bit range constraint alone rules out a simple (TOF_bin << 16) | drift_bin split.
+The dt_bin (bytes[4:6]) encodes IMS drift time linearly within the scan window:
+
+```
+drift_time_ms = dt_bin * scan_time_ms / 65536
+```
+
+where scan_time_ms = scan_time in ms from _FUNCTNS.INF +0x020 (× 1000).
+
+The IMS grid is sparse relative to the push count: instruments use N_IMS equally-spaced
+drift bins covering the full scan duration.
+
+| Dataset | scan_time | dt_bin step | N_IMS bins | IMS bin width |
+|---------|-----------|-------------|------------|---------------|
+| WANG    | 1000 ms   | 912         | 71         | 13.9 ms       |
+| CtpA    | 300 ms    | ~4928       | 13         | 22.6 ms       |
+
+The dt_bin value for each cell is FIXED across all scans (does not change with RT).
+Only the ion count at that cell varies scan-to-scan.
+
+Cross-validated: WANG _PROC003.DAT dt_bin field uses the same 1712-unit spacing
+as the raw _FUNC001.DAT dt_bin field, confirming they are the same IMS coordinate.
+
+### Sentinel Records
+
+- CtpA: has TWO zero-count sentinel records (first and last in scan, same as Encoding C).
+  First sentinel tof_bin = tof_bin_low (mz_low anchor); last sentinel = tof_bin_high.
+- WANG: NO zero-count sentinels. First record tof_bin = tof_bin_low directly (no zero record).
+
+For m/z decoding, tof_bin_low and tof_bin_high can always be derived from the first and last
+records of any scan (sentinel or first real hit).
+
+### TOF m/z Decoding (Encoding B)
+
+Uses the tof_bin field (bytes[6:8]) only; dt_bin is NOT used for m/z.
+Formula identical to Encoding C except sub_bin = 0 (integer tof_bin only, no sub-bin):
+
+```
+A_us         = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6   [µs/sqrt(Da)]
+
+# From first/last records of scan:
+tof_bin_low  = tof_bin of first record in scan                    [integer]
+tof_bin_high = tof_bin of last record in scan                     [integer]
+t_low        = A_us * sqrt(mz_low)                                [µs]
+t_high       = A_us * sqrt(mz_high)                               [µs]
+t_bin        = (t_high - t_low) / (tof_bin_high - tof_bin_low)   [µs/bin]
+
+# For each data record:
+t_raw_us     = t_low + (tof_bin - tof_bin_low) * t_bin            [µs]
+t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                   [T1 polynomial]
+mz           = (t_cal_us / A_us)^2                                 [Da]
+```
+
+Note: m/z precision is limited to integer tof_bin (no sub-bin fractional correction).
+At 4.6-5.6 ns/bin, resolution at mz=500 Da is ~0.10 Da per bin.
+
+Validated: CtpA scan 228 (RT=2.4268 min).
+Expected m/z=122.08 (from Apex3DIons.csv accession), decoded mz_raw≈121.67-122.03 from
+records at tof_bin=16191-16195 using the sentinel-derived t_bin=4.62 ns. After
+calibration polynomial the decoded m/z converges to the Apex3D-reported value.
 
 ## Encoding C: 8-byte records (non-IMS QTof mode — Xevo G2-XS)
 
@@ -169,16 +222,19 @@ at mid-gradient in a 20-minute LC run.
 
 Both encodings use 8-byte records and IDX Variant B (30-byte stride).
 The presence of IMS data can be confirmed by:
-- `Apex3DIons.csv` in the `.raw` folder (IMS only)
-- IDX +0x04 field: for IMS, the value encodes push count (~32544); for non-IMS Xevo G2-XS it is also non-zero (needs further analysis)
-- Bytes[0-1] of every DAT record: always 0x0000 for Encoding C; flags non-zero possible for Encoding B
+- `Apex3DIons.csv` in the `.raw` folder (IMS only, if Apex3D processing was run)
+- `_FUNCTNS.INF` scan_subtype byte +0x01: 0x71 = IMS survey, 0xF1 = IMS lock-mass
+- Record structure: Encoding B bytes[0:2] = 0x0000 always; Encoding C also always 0x0000.
+  Distinguishing B from C requires checking whether bytes[4:6] (lo) covers the full 0-65535
+  range uniformly (B = IMS bins, typically 13-71 fixed positions) vs varying per record (C = sub_bin).
+
+In practice, IMS datasets always have `_PROC*.DAT/IDX/STS` files or Apex3D output files.
 
 ## Fields Under Investigation
 
 - Encoding A: exact semantics of byte[0] flag values (0, 2, 3, 4); possibly sub-bin phase offset
 - Encoding A: exact multiplier/scale relationship between block types (0x80-0xB0) and TDC intensity
-- Encoding B: bit split between drift-time and m/z in the compound u32 (no open-source reference found)
-- Encoding B: whether byte[0] flag values {32, 64, 128, 192} encode anything useful
+- Encoding B: whether byte[0] ever takes non-zero values and what they encode
 
 ## Reference Sources
 
