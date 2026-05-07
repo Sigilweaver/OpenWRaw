@@ -20,9 +20,9 @@ method, calibration state, and all acquired spectra.
 | `_CHROMS.INF` | Binary | **Fully decoded** | LC channel descriptor table |
 | `_CHROnnnn.DAT` | Binary | **Fully decoded** | LC channel time-series data (f32 RT + f32 value) |
 | `_extern.inf` | ASCII | **Fully known** | Instrument geometry constants (Lteff, Veff, pusher period) |
-| `_INLET.INF` | Binary | Undocumented | LC inlet / pump conditions |
-| `_HISTORY.INF` | Binary | Undocumented | Acquisition history log |
-| `_PROCnnn.DAT/IDX/STS` | Binary | Undocumented | Post-processed spectrum data |
+| `_INLET.INF` | ASCII text | **Fully known** | ACE inlet method record (LC runs only) |
+| `_HISTORY.INF` | Binary | Partially decoded | Waters PT with 0 descriptors; data opaque |
+| `_PROCnnn.DAT/IDX/STS` | Binary | Partially decoded | Post-processed IMS-MS peak data (IMS runs only) |
 | `APEXnnnD.BIN` | Binary | Undocumented | Apex3D IMS peak-detection output (IMS only) |
 | `APEXnnnDIONS.CSV` | CSV | Undocumented | Apex3D ion list (IMS only) |
 
@@ -75,14 +75,28 @@ presence of `APEXnnnD.BIN` or `APEXnnnDIONS.CSV` is the reliable IMS indicator.
 For Encodings A and C (decodable):
 
 ```
-t_raw  = tof_bin * (PusherInterval / 65536)         # PusherInterval from _extern.inf
-t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial from _HEADER.TXT
-mz     = (t_cal / A_us)^2
+# Common to both:
 A_us   = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6  # from _extern.inf
+mz     = (t_cal_us / A_us)^2
+t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial, _HEADER.TXT
+
+# Encoding A (6-byte, non-IMS QTOF):
+#   First record of each scan is a zero-intensity sentinel;
+#   sentinel.tof_bin = max TOF bin corresponding to mz_high.
+t_bin_us   = A_us * sqrt(mz_high) / sentinel_tof_bin  # bin width in microseconds
+t_raw_us   = tof_bin * t_bin_us
+
+# Encoding C (8-byte, Xevo G2-XS):
+#   First record = sentinel at mz_low_bin, last = sentinel at mz_high_bin.
+t_low_us   = A_us * sqrt(mz_low)
+t_high_us  = A_us * sqrt(mz_high)
+t_bin_us   = (t_high_us - t_low_us) / (mz_high_bin - mz_low_bin)
+frac_bin   = (tof_bin - mz_low_bin) + sub_bin / 65536
+t_raw_us   = t_low_us + frac_bin * t_bin_us
 ```
 
 where `m_proton = 1.6726e-27 kg`, `e = 1.6022e-19 C`,
-`Lteff_m = Lteff_mm / 1000`.
+`Lteff_m = Lteff_mm / 1000`, and `mz_low`/`mz_high` come from `_FUNCTNS.INF`.
 
 ## Waters Parameter Table Format
 
@@ -132,3 +146,5 @@ _CHROMS.INF uses a 128-byte header + 85-byte records (different stride).
 - [06 - _extern.inf](06-extern-inf.md)
 - [07 - _FUNCnnn.STS](07-func-sts.md)
 - [08 - _CHROnnnn.DAT](08-chro-dat.md)
+- [09 - _PROCnnn files](09-proc-files.md)
+- [10 - _INLET.INF / _HISTORY.INF](10-aux-files.md)

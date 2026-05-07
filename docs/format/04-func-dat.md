@@ -6,49 +6,60 @@ Two distinct record formats observed depending on acquisition mode.
 
 ## Encoding A: 6-byte records (non-IMS / simple TOF-MS)
 
-### Status: Partially Decoded
+### Status: Decoded and Validated (Phase 3)
 
 Observed in: PXD058812 (QTOF, native MS, no ion mobility)
 
 Key facts:
 - File is a flat array of 6-byte records (no top-level file header)
 - Scan boundaries are given by IDX Variant A offsets (u32@0x00)
-- Each scan begins with a fixed sentinel record: `00 00 70 ca ff c7`
-- Blank/empty scans have exactly 2 records (12 bytes) both being sentinels
-- m/z values are NOT stored directly; instead, the TOF time-bin index is stored
-  and must be converted using calibration constants from `_extern.inf`
+- Each scan begins with a sentinel record that encodes the scale factor for t_bin
+- Blank/empty scans have exactly 2 records (12 bytes): a sentinel + one null record
+- m/z values are NOT stored directly; the TOF time-bin is stored and decoded with calibration
 
 ### 6-byte Record Layout
 
-| Bytes | Type | Confirmed | Description |
-|-------|------|-----------|-------------|
-| 0     | u8   | No        | Flags: 0=normal, 2=? (alternates in ~every 3rd record) |
-| 1-3   | u24  | No        | Raw intensity (includes background pedestal ~36864 counts) |
-| 4-5   | u16  | **Yes**   | TOF time-bin index (m/z encoded via TOF calibration formula) |
+| Bytes | Type    | Confirmed | Description |
+|-------|---------|-----------|-------------|
+| 0     | u8      | Partial   | Flags: 0=normal, 2=?, 3=?, 4=?; may encode sub-bin phase offset |
+| 1     | u8      | Yes       | Always 0x00 |
+| 2     | u8      | Partial   | Block type: 0x70=sentinel, 0x80/0x90/0xA0/0xB0=data (higher=more sensitive range) |
+| 3     | u8      | Yes       | Intensity (8-bit TDC count, 0-255); 255 = saturated |
+| 4-5   | u16 LE  | Yes       | tof_bin: TOF time-bin index |
 
-### TOF m/z Decoding
-
-Calibration constants are in `_HEADER.TXT` (`$$ Cal Function 1:`) and `_extern.inf`.
-Format `T1` polynomial calibration:
-
-```
-t_us = time_bin * (pusher_cycle_us / 65536)
-mz = approx (t_us / A)^2     where A = sqrt(m_proton * Lteff / (2 * e * Veff))
-```
-
-In practice, use the polynomial coefficients from `Cal Function 1:` for better accuracy.
-
-Validated example (molecular_mass_P15_01.raw, scan 3):
-- Lteff=1997.94 mm, Veff=9100 V, pusher=62 us
-- time_bin=38747 -> mz=1172.5 Da (protein charge state)
-- time_bin=40026 -> mz=1251.2 Da (next charge state)
-- sentinel u16=51199 -> mz=2047 Da (~= scan upper limit of 2000 Da)
+Data records appear grouped by block type in decreasing order (0x80 first, then 0x90, 0xA0, 0xB0).
+Within each block type, records are sorted by ascending tof_bin. The block type likely encodes
+the intensity dynamic range tier (strong peaks first, weak peaks last), but the exact multiplier
+relationship between tiers is not yet fully characterized.
 
 ### Sentinel Record
 
-Every scan starts with `00 00 70 ca ff c7`. This is a fixed magic header.
-The u24 field = 28874 (0x70CA) and u16 = 51199 (0xC7FF) in all observed samples.
-Purpose unclear (possibly scan metadata marker).
+Every scan begins with exactly ONE sentinel record: `00 00 70 CA FF C7` (observed).
+- byte[2] = 0x70 (distinguishes sentinel from data blocks 0x80+)
+- bytes[4:6] u16 LE = **sentinel_tof_bin** = the maximum TOF bin used in this scan,
+  corresponding to the flight time of an ion at mz_high
+
+The sentinel_tof_bin encodes the TOF scale and varies with instrument calibration.
+In PXD058812: sentinel_tof_bin = 51199 for mz_high = 3000 Da.
+
+### TOF m/z Decoding (Encoding A)
+
+Calibration constants: `_HEADER.TXT` (Cal Function N polynomial), `_extern.inf` (Lteff, Veff).
+
+```
+A_us         = (Lteff_mm / 1000) / sqrt(2 * e_per_Da * Veff) * 1e6   [µs/sqrt(Da)]
+t_bin_us     = A_us * sqrt(mz_high) / sentinel_tof_bin               [µs/bin]
+t_raw_us     = tof_bin * t_bin_us                                     [µs]
+t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                      [T1 polynomial]
+mz           = (t_cal_us / A_us)^2                                    [Da]
+```
+
+where `mz_high` is from `_FUNCTNS.INF` +0x120 and `sentinel_tof_bin` from bytes[4:6] of the
+first record of each scan.
+
+Validated: PXD058812/molecular_mass_P15_01.raw scan 5 (RT=0.12 min).
+Strongest peaks at m/z ≈ 1693-1846 Da, consistent with a native MS protein (charge state envelope
+matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705 Da).
 
 ## Encoding B: 8-byte records (IMS mode — SYNAPT G2-Si)
 
@@ -91,44 +102,68 @@ The upper-16-bit range constraint alone rules out a simple (TOF_bin << 16) | dri
 
 ## Encoding C: 8-byte records (non-IMS QTof mode — Xevo G2-XS)
 
-### Status: Decoded
+### Status: Decoded and Validated (Phase 3)
 
 Observed in: PXD075602 (DHPR_11257-1.raw, Xevo G2-XS QTof)
 
 Key facts:
 - Same 30-byte IDX Variant B as IMS datasets; DAT offsets at IDX+0x16
 - Same 8-byte record size as Encoding B, but structurally different internal layout
-- Scan sizes range from 5,776 to 1,019,888 bytes (722–127,486 records per scan)
+- Scan sizes range from 5,776 to 1,019,888 bytes (722-127,486 records per scan)
 - Records are sorted ascending by compound coordinate (bytes 4-7)
-- Bytes[0-1] are **always 0x0000** (no flags, no drift time — non-IMS instrument)
+- Bytes[0-1] are **always 0x0000** (no flags, no drift time - non-IMS instrument)
+- Every scan has a fixed FIRST record (zero intensity, encodes mz_low bound)
+  and a fixed LAST record (zero intensity, encodes mz_high bound)
 
 ### 8-byte Record Layout (non-IMS QTof mode)
 
-| Bytes | Type | Confirmed | Description |
-|-------|------|-----------|-------------|
-| 0-1   | u16  | **Yes**   | Always 0 (reserved / no drift time for non-IMS instruments) |
-| 2-3   | u16  | **Yes**   | Intensity (16-bit unsigned; 0–~500 range typical for centroid) |
-| 4-5   | u16  | No        | TDC sub-bin position (fine timing within TOF bin cluster; varies per bin) |
-| 6-7   | u16  | **Yes**   | TOF bin index → m/z via T1 calibration polynomial |
+| Bytes | Type   | Confirmed | Description |
+|-------|--------|-----------|-------------|
+| 0-1   | u16 LE | Yes       | Always 0 (no drift-time axis for non-IMS instruments) |
+| 2-3   | u16 LE | Yes       | Intensity (16-bit unsigned; 0-~500 range typical) |
+| 4-5   | u16 LE | Yes       | Sub-bin: fine TDC position within the coarse TOF bin (fractional offset, 0-65535) |
+| 6-7   | u16 LE | Yes       | tof_bin: coarse TOF time-bin index |
 
-The compound u32 at bytes 4-7 (read as LE) is `(tof_bin << 16) | sub_bin`, and records
-are sorted ascending by this dword, i.e. primarily by `tof_bin`, then by `sub_bin`.
+The sort key compound u32 = (tof_bin << 16) | sub_bin (ascending). Records are sorted
+primarily by tof_bin (coarse position), then sub_bin (fine position) within each tof_bin.
 
-### TOF Bin → m/z Decoding (Encoding C)
+### Sentinel Records
 
-Same formula as Encoding A but using calibration constants from `_HEADER.TXT` (`Cal Function N`)
-and `_extern.inf`:
+- **First record** (always zero intensity): tof_bin = mz_low_bin, encodes start of the
+  active detection window. Constant across all scans of the same function.
+  Example (DHPR Fn1): tof_bin=13887 → corresponds to mz_low=50 Da.
+
+- **Last record** (always zero intensity): tof_bin = mz_high_bin, encodes end of the
+  active detection window. Constant across all scans.
+  Example (DHPR Fn1): tof_bin=23727 → corresponds to mz_high=1200 Da.
+
+The sentinel pair provides the linear calibration anchor for converting tof_bin to flight time.
+
+### TOF m/z Decoding (Encoding C)
+
+Calibration constants: `_HEADER.TXT` (Cal Function N polynomial), `_extern.inf` (Lteff, Veff),
+`_FUNCTNS.INF` (mz_low at +0x0A0, mz_high at +0x120).
 
 ```
-t_raw_us = tof_bin × (pusher_cycle_us / 65536)
-t_cal_us = c0 + c1·t_raw + c2·t_raw² + ...    (T1 polynomial; see 01-header-txt.md)
-mz       = (t_cal_us / A_us)²
+A_us         = (Lteff_mm / 1000) / sqrt(2 * e_per_Da * Veff) * 1e6   [µs/sqrt(Da)]
+
+# From sentinel records:
+mz_low_bin   = tof_bin of first record in scan                        [integer]
+mz_high_bin  = tof_bin of last record in scan                         [integer]
+t_low        = A_us * sqrt(mz_low)                                    [µs]
+t_high       = A_us * sqrt(mz_high)                                   [µs]
+t_bin        = (t_high - t_low) / (mz_high_bin - mz_low_bin)         [µs/bin]
+
+# For each data record:
+frac_bin     = tof_bin - mz_low_bin + sub_bin / 65536                 [bins, fractional]
+t_raw_us     = t_low + frac_bin * t_bin                               [µs]
+t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                      [T1 polynomial]
+mz           = (t_cal_us / A_us)^2                                    [Da]
 ```
 
-Validated example (DHPR_11257-1.raw, scan 0):
-- Lteff=1800 mm, Veff=6328.24 V, pusher=60.3 µs → A_us=1.218477, t_per_bin=0.920105 ns
-- tof_bin=13887 → t_raw=12.778 µs → mz≈109.97 Da (first ion in 50–1200 Da scan)
-- tof_bin=13901 → mz≈110.19 Da (next detected ion, +0.22 Da)
+Validated: DHPR_11257-1.raw scan 575 (RT=10.022 min).
+Top peaks at m/z ≈ 591, 608, 809, 822, 881 Da - consistent with LC-MS tryptic peptides
+at mid-gradient in a 20-minute LC run.
 
 ### Distinguishing Encoding B from C
 
@@ -140,12 +175,10 @@ The presence of IMS data can be confirmed by:
 
 ## Fields Under Investigation
 
-- Encoding A: exact meaning of byte[0] flag values (0 vs 2)
-- Encoding A: whether u24@1 is raw TDC counts or scaled intensity
-- Encoding B: bit split between drift-time and m/z in the compound u32
+- Encoding A: exact semantics of byte[0] flag values (0, 2, 3, 4); possibly sub-bin phase offset
+- Encoding A: exact multiplier/scale relationship between block types (0x80-0xB0) and TDC intensity
+- Encoding B: bit split between drift-time and m/z in the compound u32 (no open-source reference found)
 - Encoding B: whether byte[0] flag values {32, 64, 128, 192} encode anything useful
-- Encoding C: meaning of sub-bin field (bytes 4-5); TDC sub-bin vs other
-- Encoding C: IDX +0x04 field interpretation for non-IMS instruments
 
 ## Reference Sources
 

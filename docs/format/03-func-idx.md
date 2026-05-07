@@ -46,17 +46,45 @@ Key facts:
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
 | 0x00   | u32  | No        | Flags (always 0 in tested datasets) |
-| 0x04   | u16  | No        | ~32544 / varies; possibly IMS push count |
-| 0x06   | u16  | No        | Constant per file (0x1800 or 0x1801) |
-| 0x08   | f32  | No        | Large value, fluctuates (TIC?) |
+| 0x04   | u32  | Partial   | Hardware tick counter (scan duration); see note below |
+| 0x08   | u32  | Partial   | Hardware counter, scan-varying; see note below |
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
-| 0x10   | f32  | No        | Varies widely |
-| 0x14   | u16  | No        | ~42414 (unit unclear) |
+| 0x10   | f32  | No        | Varies; could be base peak m/z |
+| 0x14   | u16  | No        | Small value, purpose unknown |
 | 0x16   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x1A   | u8   | No        | Usually 0 |
-| 0x1B-0x1D | zeroes | Yes | Always zero in tested datasets |
+| 0x1A   | u32  | No        | Always 0 in tested datasets |
 
 Validated: sum of (IDX[i+1].offset - IDX[i].offset) for all i = DAT file size exactly.
+
+### Field +0x04: Hardware tick counter
+
+Observed range: approximately 402.6M-402.8M across all corpus instruments.
+Varies by +/-50K between consecutive scans (jitter in scan execution time).
+
+Hypothesis: total 800-MHz reference-clock ticks elapsed during the scan.
+Predicted value = n_pushes x (pusher_period_us x 800):
+
+| Dataset | n_pushes | IDX+0x04 / n_pushes | Implied period at 800 MHz |
+|---------|----------|---------------------|--------------------------|
+| DHPR    | 8299     | 48520               | 60.6 us                  |
+| WANG    | 14389    | 27990               | 35.0 us                  |
+| CtpA    | 4317     | 93299               | 116.6 us                 |
+
+DHPR result (60.6 us) is consistent with the FUNCTNS.INF-derived 60.25 us pusher period.
+WANG result (35.0 us) corrects the previous 69 us estimate from tof_depth alone.
+CtpA (116.6 us) is anomalously long; may reflect a different acquisition mode.
+
+The 800 MHz figure is inferred; the actual clock rate is not confirmed from
+available data.
+
+### Field +0x08: Scan counter (purpose unclear)
+
+Observed range: approximately 1.17B-1.29B across corpus. Fluctuates by up to
+7% from first to last scan of a run. The variation pattern across scans is
+consistent with a TIC chromatogram (rises and falls with elution) but the
+absolute value does not match the sum of intensity values from the DAT records
+by any simple factor. May encode raw TDC hit counts from the detector hardware
+before per-scan intensity processing.
 
 ## Distinguishing Variant A from B
 
@@ -68,7 +96,7 @@ Validated: sum of (IDX[i+1].offset - IDX[i].offset) for all i = DAT file size ex
 ## Fields Under Investigation
 
 - Variant A: encoding of +0x04 function/type field
-- Variant B: meaning of +0x04 (IMS push count?), +0x08 (TIC vs base peak)
+- Variant B: +0x04 clock-rate confirmation (800 MHz assumed); +0x08 TDC/TIC encoding
 - Whether a 32-byte variant exists for other instrument generations
 
 ## Reference Sources
