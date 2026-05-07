@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/openwraw", "crates/openwraw-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Nathan Riley"]
+license = "MIT"
+repository = "https://github.com/NathanRiley/OpenWRaw"
+
+[workspace.dependencies]
+openwraw = { path = "crates/openwraw" }

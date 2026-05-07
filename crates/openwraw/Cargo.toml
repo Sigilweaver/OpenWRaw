@@ -1,0 +1,10 @@
+[package]
+name = "openwraw"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]

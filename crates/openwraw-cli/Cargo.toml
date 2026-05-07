@@ -1,0 +1,9 @@
+[package]
+name = "openwraw-cli"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+openwraw.workspace = true

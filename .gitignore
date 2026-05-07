@@ -1,0 +1,28 @@
+# ── Gitignored working directories ───────────────────────────────────────────
+re/
+
+# ── Rust ─────────────────────────────────────────────────────────────────────
+target/
+Cargo.lock
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+analysis/.venv/
+analysis/dist/
+
+# ── uv ───────────────────────────────────────────────────────────────────────
+uv.lock
+
+# ── Editor / OS ──────────────────────────────────────────────────────────────
+.DS_Store
+*.swp
+*.swo
+.idea/
+
+# ── Corpus data (large binary files – stored separately) ─────────────────────
+corpus/PXD*/
+corpus/index.csv
