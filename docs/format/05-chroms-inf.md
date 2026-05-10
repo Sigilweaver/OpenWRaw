@@ -99,7 +99,7 @@ Units encoding is Windows-1252: `°` is 0xB0, `µ` is 0xB5.
 ## Companion Chromatogram Files
 
 For each data record in `_CHROMS.INF` there is a corresponding `_CHROnnnn.DAT` file
-numbered 1-based (e.g., `_CHRO0001.DAT` for record 0). The `.DAT` files contain the
+numbered 1-based with 3-digit zero-padding (e.g., `_CHRO001.DAT` for record 0). The `.DAT` files contain the
 time-series intensity data for each channel. The encoding of `_CHROnnnn.DAT` is not
 yet decoded (but see `$CC$` scale factor for a clue to the units conversion).
 
