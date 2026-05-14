@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "openwraw"
+description = "Python bindings for the OpenWRaw Waters MassLynx RAW file parser"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Nathan Riley" }]
+dynamic = ["version"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "crates/openwraw-py/Cargo.toml"

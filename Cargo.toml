@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/openwraw", "crates/openwraw-cli"]
+members = ["crates/openwraw", "crates/openwraw-cli", "crates/openwraw-py"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,3 +11,4 @@ repository = "https://github.com/NathanRiley/OpenWRaw"
 
 [workspace.dependencies]
 openwraw = { path = "crates/openwraw" }
+pyo3 = { version = "0.28.3", features = ["extension-module"] }

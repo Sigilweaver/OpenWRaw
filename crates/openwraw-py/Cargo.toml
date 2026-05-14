@@ -1,0 +1,12 @@
+[package]
+name = "openwraw-py"
+version.workspace = true
+edition = "2021"
+
+[lib]
+name = "openwraw"
+crate-type = ["cdylib"]
+
+[dependencies]
+openwraw.workspace = true
+pyo3 = { workspace = true }
