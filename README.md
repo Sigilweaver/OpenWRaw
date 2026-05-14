@@ -38,6 +38,7 @@ analysis/       Python/uv tooling for corpus acquisition and binary analysis
 crates/
   openwraw/     Core Rust library (no external dependencies, 69 tests)
   openwraw-cli/ CLI tool
+  openwraw-py/  PyO3 Python bindings
 docs/
   format/       Reverse-engineered format documentation (11 spec files)
 re/             Working notes (gitignored)
@@ -101,6 +102,35 @@ for scan in &scans {
     let spectrum = decode_encoding_a(&dat_bytes[start..end], &params)?;
     println!("RT={:.2}min  {} peaks", scan.retention_time_min, spectrum.mz.len());
 }
+```
+
+## Python Usage
+
+Requires: Python 3.8+, maturin
+
+```sh
+pip install maturin
+maturin develop
+```
+
+```python
+import openwraw
+
+r = openwraw.RawReader("sample.raw")
+print(r.functions)        # list of FunctionInfo
+
+# Read a 1-D spectrum (Encoding A or C)
+spec = r.read_spectrum(1, 0)
+print(spec.mz[:5], spec.intensity[:5])
+
+# Read a full IMS spectrum (Encoding B, SYNAPT)
+ims = r.read_ims_spectrum(1, 0)
+print(ims.mz[:3], ims.drift_time_ms[:3])
+
+# Chromatographic channels
+for ch in r.channels:
+    pts = r.read_chrom(ch.index)
+    print(ch.name, ch.units, len(pts), "points")
 ```
 
 ## Analysis Tooling
