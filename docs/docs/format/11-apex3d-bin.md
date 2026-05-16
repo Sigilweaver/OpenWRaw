@@ -152,4 +152,4 @@ decoding of Peak/PeakEx is not necessary for reading or writing spectrum data.
 
 - Empirical analysis: CtpA (PXD068881)
 - CSV format: self-describing column headers
-- Binary structure: reverse-engineered from hex analysis
+- Binary structure: decoded from hex analysis

@@ -85,7 +85,7 @@ Key facts:
 | 4-5   | u16 LE | **Yes**   | dt_bin: IMS drift time bin (see below) |
 | 6-7   | u16 LE | **Yes**   | tof_bin: TOF time bin (same role as Encoding C bytes[6-7]) |
 
-Sort key = (tof_bin << 16) | dt_bin, ascending. Records are sorted primarily by tof_bin
+Sort key = `(tof_bin << 16) | dt_bin`, ascending. Records are sorted primarily by tof_bin
 (= m/z) then by dt_bin (= IMS drift position) within each tof_bin group.
 
 Note: in previous analysis, bytes[1:4] were incorrectly treated as a u24 intensity.
@@ -177,7 +177,7 @@ Key facts:
 | 4-5   | u16 LE | Yes       | Sub-bin: fine TDC position within the coarse TOF bin (fractional offset, 0-65535) |
 | 6-7   | u16 LE | Yes       | tof_bin: coarse TOF time-bin index |
 
-The sort key compound u32 = (tof_bin << 16) | sub_bin (ascending). Records are sorted
+The sort key compound u32 = `(tof_bin << 16) | sub_bin` (ascending). Records are sorted
 primarily by tof_bin (coarse position), then sub_bin (fine position) within each tof_bin.
 
 ### Sentinel Records
