@@ -19,3 +19,10 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 manifest-path = "crates/openwraw-py/Cargo.toml"
+
+[project.urls]
+Homepage = "https://sigilweaver.app/openwraw/"
+Documentation = "https://sigilweaver.app/openwraw/docs/"
+Source = "https://github.com/Sigilweaver/OpenWRaw"
+Changelog = "https://github.com/Sigilweaver/OpenWRaw/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Sigilweaver/OpenWRaw/issues"
