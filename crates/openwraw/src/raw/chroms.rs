@@ -86,7 +86,10 @@ impl ChromsInf {
 
             // Bytes 4..85: null-padded channel name followed by null-padded $CC$ string.
             let payload = &rec[4..RECORD_SIZE];
-            let name_end = payload.iter().position(|&b| b == 0).unwrap_or(payload.len());
+            let name_end = payload
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(payload.len());
             let name = decode_cp1252(&payload[..name_end]);
 
             let (scale_f, units) = payload
@@ -170,12 +173,11 @@ fn decode_cp1252(bytes: &[u8]) -> String {
     // Windows-1252 supplement table for bytes 0x80-0x9F.
     // Bytes 0xA0-0xFF map directly to U+00A0-U+00FF (same as Latin-1).
     const W1252: [char; 32] = [
-        '\u{20AC}', '\u{0081}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}',
-        '\u{2020}', '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}',
-        '\u{0152}', '\u{008D}', '\u{017D}', '\u{008F}', '\u{0090}', '\u{2018}',
-        '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
-        '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{009D}',
-        '\u{017E}', '\u{0178}',
+        '\u{20AC}', '\u{0081}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008D}',
+        '\u{017D}', '\u{008F}', '\u{0090}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}',
+        '\u{0153}', '\u{009D}', '\u{017E}', '\u{0178}',
     ];
     bytes
         .iter()
@@ -199,7 +201,11 @@ fn parse_cc_spec(bytes: &[u8]) -> Option<(f64, String)> {
     if parts.len() < 6 {
         return None;
     }
-    let scale_f = std::str::from_utf8(parts[1]).ok()?.trim().parse::<f64>().ok()?;
+    let scale_f = std::str::from_utf8(parts[1])
+        .ok()?
+        .trim()
+        .parse::<f64>()
+        .ok()?;
     let units = decode_cp1252(parts[5]);
     Some((scale_f, units))
 }
@@ -212,10 +218,10 @@ mod tests {
 
     fn make_header(n_meta: u16, n_data: usize) -> Vec<u8> {
         let mut h = vec![0u8; HEADER_SIZE];
-        h[0..2].copy_from_slice(&128u16.to_le_bytes());   // header_size
-        h[2..4].copy_from_slice(&1u16.to_le_bytes());      // version
+        h[0..2].copy_from_slice(&128u16.to_le_bytes()); // header_size
+        h[2..4].copy_from_slice(&1u16.to_le_bytes()); // version
         h[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes()); // record_size
-        h[6..8].copy_from_slice(&n_meta.to_le_bytes());    // n_meta
+        h[6..8].copy_from_slice(&n_meta.to_le_bytes()); // n_meta
         let _ = n_data; // used by caller to set file size
         h
     }
@@ -334,9 +340,9 @@ mod tests {
         let mut bytes = vec![0u8; CHRO_DATA_OFFSET];
         // Write minimal valid preamble
         bytes[0..2].copy_from_slice(&128u16.to_le_bytes()); // data_offset
-        bytes[2..4].copy_from_slice(&1u16.to_le_bytes());    // version
-        bytes[4..6].copy_from_slice(&8u16.to_le_bytes());    // bytes_per_record
-        bytes[6..8].copy_from_slice(&2u16.to_le_bytes());    // n_descriptor_records
+        bytes[2..4].copy_from_slice(&1u16.to_le_bytes()); // version
+        bytes[4..6].copy_from_slice(&8u16.to_le_bytes()); // bytes_per_record
+        bytes[6..8].copy_from_slice(&2u16.to_le_bytes()); // n_descriptor_records
         for &(rt, val) in points {
             bytes.extend_from_slice(&rt.to_le_bytes());
             bytes.extend_from_slice(&val.to_le_bytes());
@@ -357,7 +363,11 @@ mod tests {
         let pts = parse_chro_bytes(&bytes).unwrap();
         assert_eq!(pts.len(), 1);
         assert!((pts[0].rt_min - 1.23).abs() < 1e-5, "rt={}", pts[0].rt_min);
-        assert!((pts[0].value - 456.78).abs() < 0.01, "value={}", pts[0].value);
+        assert!(
+            (pts[0].value - 456.78).abs() < 0.01,
+            "value={}",
+            pts[0].value
+        );
     }
 
     #[test]
@@ -390,9 +400,7 @@ mod tests {
     #[test]
     fn corpus_ctpa_chroms_inf() {
         use std::path::Path;
-        let raw = Path::new(
-            "/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw",
-        );
+        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
         if !raw.exists() {
             return;
         }
@@ -401,7 +409,11 @@ mod tests {
         assert_eq!(ci.channels.len(), 5, "CtpA should have 5 data channels");
         // channel 0: BSM Composition B, source_type=4
         assert_eq!(ci.channels[0].source_type, 4);
-        assert!(ci.channels[0].name.contains("BSM"), "name={}", ci.channels[0].name);
+        assert!(
+            ci.channels[0].name.contains("BSM"),
+            "name={}",
+            ci.channels[0].name
+        );
         // All channels have a non-empty units string
         for ch in &ci.channels {
             assert!(!ch.units.is_empty(), "channel {} has empty units", ch.name);
@@ -414,9 +426,7 @@ mod tests {
     #[test]
     fn corpus_ctpa_chro_dat() {
         use std::path::Path;
-        let raw = Path::new(
-            "/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw",
-        );
+        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
         if !raw.exists() {
             return;
         }

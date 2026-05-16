@@ -40,8 +40,7 @@ fn main() {
         }
         "convert" => {
             let output = find_flag(&args, "-o").map(PathBuf::from);
-            let func_filter = find_flag(&args, "--function")
-                .and_then(|s| s.parse::<u32>().ok());
+            let func_filter = find_flag(&args, "--function").and_then(|s| s.parse::<u32>().ok());
             if let Err(e) = cmd_convert(&raw, output.as_deref(), func_filter) {
                 eprintln!("error: {e}");
                 std::process::exit(1);
@@ -68,45 +67,52 @@ fn cmd_inspect(raw: &Path) -> openwraw::Result<()> {
     let funcs = FunctionTable::from_path(&raw.join("_FUNCTNS.INF"))?;
 
     println!("=== _HEADER.TXT ===");
-    println!("  Version:     {}", header.version.as_deref().unwrap_or("-"));
-    println!("  Instrument:  {}", header.instrument.as_deref().unwrap_or("-"));
-    println!("  Acquired:    {} {}",
+    println!(
+        "  Version:     {}",
+        header.version.as_deref().unwrap_or("-")
+    );
+    println!(
+        "  Instrument:  {}",
+        header.instrument.as_deref().unwrap_or("-")
+    );
+    println!(
+        "  Acquired:    {} {}",
         header.acquired_date.as_deref().unwrap_or("-"),
-        header.acquired_time.as_deref().unwrap_or(""));
-    println!("  Operator:    {}", header.operator.as_deref().unwrap_or("-"));
+        header.acquired_time.as_deref().unwrap_or("")
+    );
+    println!(
+        "  Operator:    {}",
+        header.operator.as_deref().unwrap_or("-")
+    );
     if let Some(sd) = &header.sample_description {
-        if !sd.is_empty() { println!("  Sample:      {sd}"); }
+        if !sd.is_empty() {
+            println!("  Sample:      {sd}");
+        }
     }
     println!("  A_us:        {:.6} µs/sqrt(Da)", ext.a_us());
 
-    println!("\n=== _FUNCTNS.INF ({} function(s)) ===", funcs.functions.len());
+    println!(
+        "\n=== _FUNCTNS.INF ({} function(s)) ===",
+        funcs.functions.len()
+    );
     for f in &funcs.functions {
         let enc = encoding_label(f.scan_subtype);
         let lock = if f.is_lock_mass() { " [lock mass]" } else { "" };
         println!(
             "  Function {}: type={:#04x} sub={:#04x}{} enc={} mz=[{:.0},{:.0}] scan={:.3}s",
-            f.index,
-            f.function_type,
-            f.scan_subtype,
-            lock,
-            enc,
-            f.mz_low,
-            f.mz_high,
-            f.scan_time_s
+            f.index, f.function_type, f.scan_subtype, lock, enc, f.mz_low, f.mz_high, f.scan_time_s
         );
 
         let idx_path = raw.join(format!("_FUNC{:03}.IDX", f.index));
         if idx_path.exists() {
             let idx_bytes = std::fs::read(&idx_path)?;
             match ScanIndex::from_bytes(&idx_bytes) {
-                Ok(ScanIndex::A(v)) => println!(
-                    "    IDX: Variant A, {} scans (Encoding A)",
-                    v.len()
-                ),
-                Ok(ScanIndex::B(v)) => println!(
-                    "    IDX: Variant B, {} scans (Encoding B/C)",
-                    v.len()
-                ),
+                Ok(ScanIndex::A(v)) => {
+                    println!("    IDX: Variant A, {} scans (Encoding A)", v.len())
+                }
+                Ok(ScanIndex::B(v)) => {
+                    println!("    IDX: Variant B, {} scans (Encoding B/C)", v.len())
+                }
                 Err(e) => println!("    IDX: error ({e})"),
             }
         }
@@ -161,10 +167,7 @@ fn cmd_convert(
     let targets: Vec<_> = funcs
         .functions
         .iter()
-        .filter(|f| {
-            !f.is_lock_mass()
-                && func_filter.map_or(true, |n| n == f.index)
-        })
+        .filter(|f| !f.is_lock_mass() && func_filter.map_or(true, |n| n == f.index))
         .collect();
 
     if targets.is_empty() {
@@ -239,8 +242,7 @@ fn cmd_convert(
                     if end > dat.len() {
                         continue;
                     }
-                    let spec = decode_encoding_a(&dat[start..end], &params)
-                        .unwrap_or_default();
+                    let spec = decode_encoding_a(&dat[start..end], &params).unwrap_or_default();
                     write_spectrum(
                         &mut buf,
                         spectrum_index,
@@ -297,8 +299,14 @@ fn write_mzml_header(
 ) -> io::Result<()> {
     writeln!(w, r#"<?xml version="1.0" encoding="utf-8"?>"#)?;
     writeln!(w, r#"<mzML xmlns="http://psi.hupo.org/ms/mzml""#)?;
-    writeln!(w, r#"      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#)?;
-    writeln!(w, r#"      xsi:schemaLocation="http://psi.hupo.org/ms/mzml http://psidev.info/files/ms/mzML/xsd/mzML1.1.0.xsd">"#)?;
+    writeln!(
+        w,
+        r#"      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#
+    )?;
+    writeln!(
+        w,
+        r#"      xsi:schemaLocation="http://psi.hupo.org/ms/mzml http://psidev.info/files/ms/mzML/xsd/mzML1.1.0.xsd">"#
+    )?;
     writeln!(
         w,
         r#"  <cvList count="2">
@@ -373,7 +381,11 @@ fn write_spectrum(
 
     // Encode m/z as 64-bit floats, intensity as 32-bit floats (Waters native precision).
     let mz_bytes: Vec<u8> = spec.mz.iter().flat_map(|&v| v.to_le_bytes()).collect();
-    let int_bytes: Vec<u8> = spec.intensity.iter().flat_map(|&v| v.to_le_bytes()).collect();
+    let int_bytes: Vec<u8> = spec
+        .intensity
+        .iter()
+        .flat_map(|&v| v.to_le_bytes())
+        .collect();
     let mz_b64 = base64_encode(&mz_bytes);
     let int_b64 = base64_encode(&int_bytes);
 
@@ -430,9 +442,8 @@ fn xml_escape(s: &str) -> String {
 
 /// Minimal base64 encoder (no external dependencies).
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity((data.len() + 2) / 3 * 4);
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
@@ -453,4 +464,3 @@ fn base64_encode(data: &[u8]) -> String {
     }
     String::from_utf8(out).unwrap()
 }
-

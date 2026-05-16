@@ -5,10 +5,17 @@ members = ["crates/openwraw", "crates/openwraw-cli", "crates/openwraw-py"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Nathan Riley"]
-license = "MIT"
-repository = "https://github.com/NathanRiley/OpenWRaw"
+rust-version = "1.75"
+authors = ["Nathan Riley <git@nathanriley.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/Sigilweaver/OpenWRaw"
+homepage = "https://github.com/Sigilweaver/OpenWRaw"
+keywords = ["mass-spectrometry", "waters", "masslynx", "raw", "proteomics"]
+categories = ["parser-implementations", "science"]
 
 [workspace.dependencies]
 openwraw = { path = "crates/openwraw" }
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

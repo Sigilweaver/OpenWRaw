@@ -181,7 +181,9 @@ mod tests {
         // Scans 0-2 in PXD058812 are blank: n_records=2, peaks=0, rt>0
         let data = a_data(&[make_a_record(0x00000000, 2, 0.0273, 0)]);
         let idx = ScanIndex::from_bytes(&data).unwrap();
-        let ScanIndex::A(recs) = idx else { panic!("expected Variant A") };
+        let ScanIndex::A(recs) = idx else {
+            panic!("expected Variant A")
+        };
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].dat_offset, 0);
         assert_eq!(recs[0].n_records, 2);
@@ -192,8 +194,9 @@ mod tests {
     #[test]
     fn parse_variant_a_data_scan() {
         let data = a_data(&[make_a_record(0x00000024, 1050, 0.0829, 17)]);
-        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant A") };
+        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant A")
+        };
         assert_eq!(recs[0].dat_offset, 0x24);
         assert_eq!(recs[0].n_records, 1050);
         assert!((recs[0].retention_time_min - 0.0829).abs() < 1e-4);
@@ -208,8 +211,9 @@ mod tests {
             make_a_record(0x00000018, 2, 0.0644, 0),
             make_a_record(0x00000024, 1050, 0.0829, 17),
         ]);
-        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant A") };
+        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant A")
+        };
         assert_eq!(recs.len(), 4);
         assert_eq!(recs[3].dat_offset, 0x24);
         assert_eq!(recs[3].n_records, 1050);
@@ -220,11 +224,16 @@ mod tests {
         // Retention times must increase across the run.
         let rts = [0.0273f32, 0.0458, 0.0644, 0.0829];
         let data = a_data(&rts.map(|rt| make_a_record(0, 2, rt, 0)));
-        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant A") };
+        let ScanIndex::A(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant A")
+        };
         for w in recs.windows(2) {
-            assert!(w[1].retention_time_min > w[0].retention_time_min,
-                "RT not monotonic: {} <= {}", w[1].retention_time_min, w[0].retention_time_min);
+            assert!(
+                w[1].retention_time_min > w[0].retention_time_min,
+                "RT not monotonic: {} <= {}",
+                w[1].retention_time_min,
+                w[0].retention_time_min
+            );
         }
     }
 
@@ -233,8 +242,9 @@ mod tests {
     #[test]
     fn parse_variant_b_record() {
         let data = b_data(&[make_b_record(0x000047c8, 0.0540)]);
-        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant B") };
+        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant B")
+        };
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].dat_offset, 0x47c8);
         assert!((recs[0].retention_time_min - 0.0540).abs() < 1e-4);
@@ -249,8 +259,9 @@ mod tests {
             make_b_record(0x00008768, 0.0711),
             make_b_record(0x0000ccb8, 0.0883),
         ]);
-        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant B") };
+        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant B")
+        };
         assert_eq!(recs.len(), 4);
         assert_eq!(recs[0].dat_offset, 0x00000000);
         assert_eq!(recs[3].dat_offset, 0x0000ccb8);
@@ -260,8 +271,9 @@ mod tests {
     fn variant_b_dat_offsets_increase() {
         let offsets = [0x00000000u32, 0x000047c8, 0x00008768, 0x0000ccb8];
         let data = b_data(&offsets.map(|o| make_b_record(o, 0.1)));
-        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap()
-            else { panic!("expected Variant B") };
+        let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant B")
+        };
         for w in recs.windows(2) {
             assert!(w[1].dat_offset > w[0].dat_offset);
         }
@@ -285,10 +297,7 @@ mod tests {
 
     #[test]
     fn len_matches_record_count() {
-        let data = a_data(&[
-            make_a_record(0, 2, 0.1, 0),
-            make_a_record(12, 2, 0.2, 0),
-        ]);
+        let data = a_data(&[make_a_record(0, 2, 0.1, 0), make_a_record(12, 2, 0.2, 0)]);
         let idx = ScanIndex::from_bytes(&data).unwrap();
         assert_eq!(idx.len(), 2);
     }

@@ -1,5 +1,8 @@
 # OpenWRaw
 
+[![CI](https://github.com/Sigilweaver/OpenWRaw/actions/workflows/ci.yml/badge.svg)](https://github.com/Sigilweaver/OpenWRaw/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 Open-source, cross-platform reader for the Waters MassLynx RAW mass
 spectrometry data format.
 
@@ -144,5 +147,7 @@ uv sync
 
 ## License
 
-MIT
+Apache-2.0 - see [LICENSE](LICENSE).
+
+Copyright 2026 Sigilweaver Holdings LLC.
 

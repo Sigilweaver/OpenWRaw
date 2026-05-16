@@ -148,8 +148,8 @@ impl std::str::FromStr for ExternInf {
                 }
                 "Pusher Cycle Time" => {
                     // Value may be "Automatic"; ignore that.
-                    if value_str != "Automatic" {
-                        if let Ok(v) = value_str.parse::<f64>() {
+                    if let Ok(v) = value_str.parse::<f64>() {
+                        if value_str != "Automatic" {
                             pusher_from_cycle.get_or_insert(v);
                         }
                     }
@@ -179,12 +179,10 @@ impl std::str::FromStr for ExternInf {
             }
         }
 
-        let lteff_mm = lteff_mm.ok_or_else(|| {
-            crate::Error::Parse("_extern.inf: Lteff field not found".to_owned())
-        })?;
-        let veff_v = veff_v.ok_or_else(|| {
-            crate::Error::Parse("_extern.inf: Veff field not found".to_owned())
-        })?;
+        let lteff_mm = lteff_mm
+            .ok_or_else(|| crate::Error::Parse("_extern.inf: Lteff field not found".to_owned()))?;
+        let veff_v = veff_v
+            .ok_or_else(|| crate::Error::Parse("_extern.inf: Veff field not found".to_owned()))?;
         // Prefer the dedicated PusherInterval field; fall back to Pusher Cycle Time.
         let pusher_interval_us = pusher_from_interval.or(pusher_from_cycle).ok_or_else(|| {
             crate::Error::Parse(
@@ -305,7 +303,10 @@ End Mass                                       2000.0\r\n\
         let ext: ExternInf = EXTERN_PXD075602.parse().unwrap();
         assert_eq!(ext.functions.len(), 3);
         for n in 1..=3u32 {
-            let f = ext.functions.get(&n).unwrap_or_else(|| panic!("Function {n} missing"));
+            let f = ext
+                .functions
+                .get(&n)
+                .unwrap_or_else(|| panic!("Function {n} missing"));
             let ov = f.pusher_interval_us.expect("ADC Pusher Frequency missing");
             assert!((ov - 60.3).abs() < 1e-6);
         }

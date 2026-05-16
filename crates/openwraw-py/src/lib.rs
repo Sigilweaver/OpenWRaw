@@ -215,7 +215,10 @@ pub struct ChromPoint {
 #[pymethods]
 impl ChromPoint {
     fn __repr__(&self) -> String {
-        format!("ChromPoint(rt_min={:.4}, value={:.4})", self.rt_min, self.value)
+        format!(
+            "ChromPoint(rt_min={:.4}, value={:.4})",
+            self.rt_min, self.value
+        )
     }
 }
 
@@ -255,12 +258,9 @@ impl RawReader {
             )));
         }
 
-        let header =
-            Header::from_path(&raw_dir.join("_HEADER.TXT")).map_err(to_py_err)?;
-        let ext =
-            ExternInf::from_path(&raw_dir.join("_extern.inf")).map_err(to_py_err)?;
-        let funcs =
-            FunctionTable::from_path(&raw_dir.join("_FUNCTNS.INF")).map_err(to_py_err)?;
+        let header = Header::from_path(&raw_dir.join("_HEADER.TXT")).map_err(to_py_err)?;
+        let ext = ExternInf::from_path(&raw_dir.join("_extern.inf")).map_err(to_py_err)?;
+        let funcs = FunctionTable::from_path(&raw_dir.join("_FUNCTNS.INF")).map_err(to_py_err)?;
 
         let chroms_path = raw_dir.join("_CHROMS.INF");
         let chroms = if chroms_path.exists() {
@@ -324,15 +324,11 @@ impl RawReader {
             ScanIndex::A(scans) => scans
                 .get(scan_index)
                 .map(|s| s.retention_time_min)
-                .ok_or_else(|| {
-                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
-                }),
+                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
             ScanIndex::B(scans) => scans
                 .get(scan_index)
                 .map(|s| s.retention_time_min)
-                .ok_or_else(|| {
-                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
-                }),
+                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
         }
     }
 
@@ -358,8 +354,7 @@ impl RawReader {
                 if end > dat.len() {
                     return Err(PyRuntimeError::new_err("scan offset out of DAT bounds"));
                 }
-                let spec =
-                    decode_encoding_a(&dat[start..end], &params).map_err(to_py_err)?;
+                let spec = decode_encoding_a(&dat[start..end], &params).map_err(to_py_err)?;
                 Ok(Spectrum {
                     mz: spec.mz,
                     intensity: spec.intensity,
@@ -380,8 +375,7 @@ impl RawReader {
                         intensity: vec![],
                     });
                 }
-                let spec =
-                    decode_encoding_c(&dat[start..end], &params).map_err(to_py_err)?;
+                let spec = decode_encoding_c(&dat[start..end], &params).map_err(to_py_err)?;
                 Ok(Spectrum {
                     mz: spec.mz,
                     intensity: spec.intensity,
@@ -396,11 +390,7 @@ impl RawReader {
     /// `RuntimeError` if the function uses Encoding A.
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
-    fn read_ims_spectrum(
-        &self,
-        func_index: u32,
-        scan_index: usize,
-    ) -> PyResult<ImsSpectrum> {
+    fn read_ims_spectrum(&self, func_index: u32, scan_index: usize) -> PyResult<ImsSpectrum> {
         let f = self.get_function(func_index)?;
         let params = self.make_params(&f, func_index);
         let (idx, dat) = self.load_idx_dat(func_index)?;
@@ -425,8 +415,7 @@ impl RawReader {
                         intensity: vec![],
                     });
                 }
-                let spec =
-                    decode_encoding_b(&dat[start..end], &params).map_err(to_py_err)?;
+                let spec = decode_encoding_b(&dat[start..end], &params).map_err(to_py_err)?;
                 Ok(ImsSpectrum {
                     mz: spec.mz,
                     drift_time_ms: spec.drift_time_ms,
@@ -440,9 +429,10 @@ impl RawReader {
     ///
     /// `channel_index` is 0-based (matches `ChromChannel.index`).
     fn read_chrom(&self, channel_index: usize) -> PyResult<Vec<ChromPoint>> {
-        let ci = self.chroms.as_ref().ok_or_else(|| {
-            PyRuntimeError::new_err("no _CHROMS.INF in this .raw directory")
-        })?;
+        let ci = self
+            .chroms
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("no _CHROMS.INF in this .raw directory"))?;
         let chro_num = ci.chro_number_for_channel(channel_index);
         let chro_path = self.raw_dir.join(format!("_CHRO{chro_num:03}.DAT"));
         let points = read_chro_dat(&chro_path).map_err(to_py_err)?;
@@ -475,9 +465,7 @@ impl RawReader {
             .iter()
             .find(|f| f.index == func_index)
             .cloned()
-            .ok_or_else(|| {
-                PyRuntimeError::new_err(format!("function {func_index} not found"))
-            })
+            .ok_or_else(|| PyRuntimeError::new_err(format!("function {func_index} not found")))
     }
 
     fn make_params(
@@ -500,12 +488,8 @@ impl RawReader {
     }
 
     fn load_idx_dat(&self, func_index: u32) -> PyResult<(ScanIndex, Vec<u8>)> {
-        let idx_path = self
-            .raw_dir
-            .join(format!("_FUNC{func_index:03}.IDX"));
-        let dat_path = self
-            .raw_dir
-            .join(format!("_FUNC{func_index:03}.DAT"));
+        let idx_path = self.raw_dir.join(format!("_FUNC{func_index:03}.IDX"));
+        let dat_path = self.raw_dir.join(format!("_FUNC{func_index:03}.DAT"));
 
         if !idx_path.exists() {
             return Err(PyRuntimeError::new_err(format!(

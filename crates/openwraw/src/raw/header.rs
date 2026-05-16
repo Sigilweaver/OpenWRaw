@@ -138,9 +138,9 @@ fn parse_cal_value(value: &str) -> crate::Result<FunctionCal> {
         .iter()
         .filter(|s| !s.trim().is_empty())
         .map(|s| {
-            s.trim().parse::<f64>().map_err(|_| {
-                crate::Error::Parse(format!("_HEADER.TXT: invalid coefficient {s:?}"))
-            })
+            s.trim()
+                .parse::<f64>()
+                .map_err(|_| crate::Error::Parse(format!("_HEADER.TXT: invalid coefficient {s:?}")))
         })
         .collect();
 
@@ -207,7 +207,10 @@ $$ Cal Function 3: -4.777591233644572e-3,1.000131905522236e0,4.430892196785128e-
         let h: Header = HEADER_PXD075602.parse().unwrap();
         assert_eq!(h.cal_functions.len(), 3);
         for n in 1..=3u32 {
-            let cal = h.cal_functions.get(&n).unwrap_or_else(|| panic!("Cal Function {n} missing"));
+            let cal = h
+                .cal_functions
+                .get(&n)
+                .unwrap_or_else(|| panic!("Cal Function {n} missing"));
             assert_eq!(cal.cal_type, CalType::T1);
             assert_eq!(cal.coeffs.len(), 6);
             assert!((cal.coeffs[5] - 5.118758341877316e-11).abs() < 1e-25);

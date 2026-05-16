@@ -1,11 +1,23 @@
 [package]
 name = "openwraw-py"
+description = "Python bindings for the OpenWRaw Waters MassLynx RAW reader."
 version.workspace = true
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
 
 [lib]
 name = "openwraw"
 crate-type = ["cdylib"]
+
+[lints.rust]
+unsafe_code = "allow"
 
 [dependencies]
 openwraw.workspace = true

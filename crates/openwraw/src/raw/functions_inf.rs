@@ -113,6 +113,7 @@ mod tests {
     // Construct a minimal 416-byte record matching PXD058812/molecular_mass_P15_01.raw.
     // function_type=0x12, scan_subtype=0x25, cycle=1.1, inter=0.1,
     // tof_depth=17204, scan=1.0, mz_low=100, mz_high=2000.
+    #[allow(clippy::too_many_arguments)]
     fn make_record(
         func_type: u8,
         subtype: u8,
@@ -205,8 +206,10 @@ mod tests {
         // cycle=1.10, inter=0.10, tof_depth=17204, scan=1.00, mz=[100,2000]
         let data = p15_record();
         let f = &FunctionTable::from_bytes(&data).unwrap().functions[0];
-        assert!((f.cycle_time_s - (f.scan_time_s + f.interscan_delay_s)).abs() < 1e-4,
-            "cycle_time should equal scan_time + interscan_delay");
+        assert!(
+            (f.cycle_time_s - (f.scan_time_s + f.interscan_delay_s)).abs() < 1e-4,
+            "cycle_time should equal scan_time + interscan_delay"
+        );
     }
 
     #[test]

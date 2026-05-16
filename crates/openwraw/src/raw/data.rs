@@ -71,8 +71,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
             scan_bytes[2], ENC_A_SENTINEL
         )));
     }
-    let sentinel_tof_bin =
-        u16::from_le_bytes(scan_bytes[4..6].try_into().unwrap()) as f64;
+    let sentinel_tof_bin = u16::from_le_bytes(scan_bytes[4..6].try_into().unwrap()) as f64;
     if sentinel_tof_bin == 0.0 {
         return Err(crate::Error::Parse(
             "Encoding A: sentinel_tof_bin is zero".to_owned(),
@@ -117,10 +116,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
 ///
 /// The first and last record's `tof_bin` fields anchor the TOF bin→µs scale.
 /// Records with `count == 0` (sentinels) are skipped in the output.
-pub fn decode_encoding_b(
-    scan_bytes: &[u8],
-    params: &DecodeParams,
-) -> crate::Result<ImsSpectrum> {
+pub fn decode_encoding_b(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<ImsSpectrum> {
     if scan_bytes.is_empty() {
         return Ok(ImsSpectrum::default());
     }
@@ -137,8 +133,7 @@ pub fn decode_encoding_b(
         return Ok(ImsSpectrum::default());
     }
 
-    let tof_bin_low =
-        u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
+    let tof_bin_low = u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
     let last = &scan_bytes[(n - 1) * 8..n * 8];
     let tof_bin_high = u16::from_le_bytes(last[6..8].try_into().unwrap()) as f64;
 
@@ -170,7 +165,8 @@ pub fn decode_encoding_b(
         let t_raw = t_low + (tof_bin - tof_bin_low) * t_bin;
         let t_cal = params.cal.apply(t_raw);
         out.mz.push((t_cal / params.a_us).powi(2));
-        out.drift_time_ms.push(dt_bin * params.scan_time_ms / 65536.0);
+        out.drift_time_ms
+            .push(dt_bin * params.scan_time_ms / 65536.0);
         out.intensity.push(count as f32);
     }
 
@@ -203,8 +199,7 @@ pub fn decode_encoding_c(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         return Ok(Spectrum::default());
     }
 
-    let tof_bin_low =
-        u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
+    let tof_bin_low = u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
     let last = &scan_bytes[(n - 1) * 8..n * 8];
     let tof_bin_high = u16::from_le_bytes(last[6..8].try_into().unwrap()) as f64;
 
@@ -315,10 +310,7 @@ mod tests {
     //   tof_bin=6000 → t_raw=6.0 µs → mz=(6.0/1.0)^2=36.0 Da
     #[test]
     fn enc_a_decodes_peak_mz() {
-        let scan = bytes_of(&[
-            enc_a_sentinel(10000),
-            enc_a_data(0x80, 42, 6000),
-        ]);
+        let scan = bytes_of(&[enc_a_sentinel(10000), enc_a_data(0x80, 42, 6000)]);
         let spec = decode_encoding_a(&scan, &test_params()).unwrap();
         assert_eq!(spec.mz.len(), 1);
         assert!((spec.mz[0] - 36.0).abs() < 1e-8, "mz={}", spec.mz[0]);
@@ -366,8 +358,8 @@ mod tests {
     fn enc_a_mz_within_declared_range() {
         let scan = bytes_of(&[
             enc_a_sentinel(10000),
-            enc_a_data(0x80, 1, 2001),  // tof_bin just above t_low
-            enc_a_data(0x80, 1, 9999),  // tof_bin just below sentinel
+            enc_a_data(0x80, 1, 2001), // tof_bin just above t_low
+            enc_a_data(0x80, 1, 9999), // tof_bin just below sentinel
         ]);
         let p = test_params();
         let spec = decode_encoding_a(&scan, &p).unwrap();
@@ -387,9 +379,9 @@ mod tests {
     #[test]
     fn enc_b_decodes_peak_mz_and_drift() {
         let scan = bytes_of(&[
-            enc_b_record(0, 0, 2000),       // first (sentinel, count=0, tof_bin_low)
-            enc_b_record(5, 3000, 6000),    // data
-            enc_b_record(0, 0, 10000),      // last (sentinel, count=0, tof_bin_high)
+            enc_b_record(0, 0, 2000),    // first (sentinel, count=0, tof_bin_low)
+            enc_b_record(5, 3000, 6000), // data
+            enc_b_record(0, 0, 10000),   // last (sentinel, count=0, tof_bin_high)
         ]);
         let spec = decode_encoding_b(&scan, &test_params()).unwrap();
         assert_eq!(spec.mz.len(), 1);
@@ -442,9 +434,9 @@ mod tests {
     #[test]
     fn enc_c_decodes_peak_mz_no_subbin() {
         let scan = bytes_of(&[
-            enc_c_record(0, 0, 2000),    // sentinel low
-            enc_c_record(7, 0, 6000),    // data, sub_bin=0
-            enc_c_record(0, 0, 10000),   // sentinel high
+            enc_c_record(0, 0, 2000),  // sentinel low
+            enc_c_record(7, 0, 6000),  // data, sub_bin=0
+            enc_c_record(0, 0, 10000), // sentinel high
         ]);
         let spec = decode_encoding_c(&scan, &test_params()).unwrap();
         assert_eq!(spec.mz.len(), 1);
@@ -457,7 +449,7 @@ mod tests {
     fn enc_c_subbin_gives_finer_mz_than_no_subbin() {
         let scan_no_sub = bytes_of(&[
             enc_c_record(0, 0, 2000),
-            enc_c_record(1, 0, 6000),     // sub_bin=0
+            enc_c_record(1, 0, 6000), // sub_bin=0
             enc_c_record(0, 0, 10000),
         ]);
         let scan_half_sub = bytes_of(&[
@@ -505,9 +497,7 @@ mod tests {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
         use std::path::Path;
 
-        let raw = Path::new(
-            "/workspaces/OpenWRaw/corpus/PXD058812/molecular_mass_P15_01.raw",
-        );
+        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD058812/molecular_mass_P15_01.raw");
         if !raw.exists() {
             return;
         }
@@ -527,8 +517,9 @@ mod tests {
 
         let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
         let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
-        let ScanIndex::A(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap()
-            else { panic!("expected Variant A") };
+        let ScanIndex::A(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap() else {
+            panic!("expected Variant A")
+        };
 
         // Scan 3 is the first non-blank scan (scans 0-2 are blank/2-record sentinels).
         let scan3 = &idx[3];
@@ -555,9 +546,7 @@ mod tests {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
         use std::path::Path;
 
-        let raw = Path::new(
-            "/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw",
-        );
+        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
         if !raw.exists() {
             return;
         }
@@ -577,14 +566,16 @@ mod tests {
 
         let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
         let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
-        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap()
-            else { panic!("expected Variant B") };
+        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap() else {
+            panic!("expected Variant B")
+        };
 
         // Find the first scan with at least one non-zero-count record.
         let mut found_data = false;
         for (i, rec) in idx.iter().enumerate() {
             let start = rec.dat_offset as usize;
-            let end = idx.get(i + 1)
+            let end = idx
+                .get(i + 1)
                 .map(|r| r.dat_offset as usize)
                 .unwrap_or(dat_bytes.len());
             if end <= start {
@@ -601,7 +592,10 @@ mod tests {
                 assert!(m <= params.mz_high * 1.01, "mz={m} above mz_high");
             }
             for &d in &spec.drift_time_ms {
-                assert!(d >= 0.0 && d <= params.scan_time_ms, "drift={d} out of range");
+                assert!(
+                    d >= 0.0 && d <= params.scan_time_ms,
+                    "drift={d} out of range"
+                );
             }
             break;
         }
@@ -613,9 +607,7 @@ mod tests {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
         use std::path::Path;
 
-        let raw = Path::new(
-            "/workspaces/OpenWRaw/corpus/PXD075602/DHPR_11257-1.raw",
-        );
+        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD075602/DHPR_11257-1.raw");
         if !raw.exists() {
             return;
         }
@@ -635,15 +627,17 @@ mod tests {
 
         let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
         let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
-        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap()
-            else { panic!("expected Variant B") };
+        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap() else {
+            panic!("expected Variant B")
+        };
 
         // Scan 575 is mid-gradient (RT≈10 min) and expected to have signal.
         // Enumerate from scan 575 and take the first non-empty one.
         let mut found_data = false;
         for i in 575..idx.len() {
             let start = idx[i].dat_offset as usize;
-            let end = idx.get(i + 1)
+            let end = idx
+                .get(i + 1)
                 .map(|r| r.dat_offset as usize)
                 .unwrap_or(dat_bytes.len());
             let scan_bytes = &dat_bytes[start..end];
@@ -653,14 +647,25 @@ mod tests {
             }
             found_data = true;
             for &m in &spec.mz {
-                assert!(m >= params.mz_low * 0.99, "mz={m} below mz_low={}", params.mz_low);
-                assert!(m <= params.mz_high * 1.01, "mz={m} above mz_high={}", params.mz_high);
+                assert!(
+                    m >= params.mz_low * 0.99,
+                    "mz={m} below mz_low={}",
+                    params.mz_low
+                );
+                assert!(
+                    m <= params.mz_high * 1.01,
+                    "mz={m} above mz_high={}",
+                    params.mz_high
+                );
             }
             for &inten in &spec.intensity {
                 assert!(inten > 0.0, "zero-intensity record should be filtered");
             }
             break;
         }
-        assert!(found_data, "no non-empty Encoding C scan found near scan 575");
+        assert!(
+            found_data,
+            "no non-empty Encoding C scan found near scan 575"
+        );
     }
 }
