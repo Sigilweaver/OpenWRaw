@@ -17,8 +17,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - warp-ubuntu-latest-x64-4x
-          - warp-macos-latest-arm64-6x
+          - ubuntu-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - warp-ubuntu-latest-x64-4x
+          - ubuntu-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
