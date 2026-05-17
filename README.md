@@ -63,9 +63,7 @@ docs/            Docusaurus site (format spec + guides)
 
 ## License
 
-Apache-2.0 - see [LICENSE](LICENSE).
-
-Copyright 2026 Sigilweaver Holdings LLC.
+Apache-2.0. See [LICENSE](LICENSE).
 
 The format specification was developed by binary analysis of public
 mass-spectrometry datasets (PRIDE accessions).
