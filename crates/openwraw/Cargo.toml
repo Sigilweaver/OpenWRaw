@@ -1,6 +1,6 @@
 [package]
 name = "openwraw"
-description = "Pure-Rust reader for Waters MassLynx RAW mass spectrometry directories."
+description = "Rust reader for Waters MassLynx RAW mass spectrometry directories."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

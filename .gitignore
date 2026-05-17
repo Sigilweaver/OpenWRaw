@@ -26,3 +26,10 @@ uv.lock
 # ── Corpus data (large binary files – stored separately) ─────────────────────
 corpus/PXD*/
 corpus/index.csv
+
+# ── Docusaurus ───────────────────────────────────────────────────────────────
+docs/node_modules/
+docs/build/
+docs/.docusaurus/
+docs/.cache-loader/
+

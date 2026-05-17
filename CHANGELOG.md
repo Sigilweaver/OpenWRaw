@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Pure-Rust reader for the Waters MassLynx RAW directory format with
+- Rust reader for the Waters MassLynx RAW directory format with
   zero external dependencies in the core crate.
 - Three spectrum encodings decoded and validated against PRIDE corpora:
   - **Encoding A**: 6-byte records (QTOF Ultima class).
@@ -30,7 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Out of scope
 
-- Vendor-DLL paths or any Windows-only dependency.
 - Function types beyond MS / MS/MS / chromatographic channels.
 
 [0.1.0]: https://github.com/Sigilweaver/OpenWRaw/releases/tag/v0.1.0

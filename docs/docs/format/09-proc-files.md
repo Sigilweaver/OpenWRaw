@@ -80,7 +80,7 @@ struct ProcRecord {
 
 Position field decoding:
 ```
-mz_bin = position >> 16
+`mz_bin = position >> 16`
 dt_bin = position & 0xFFFF
 ```
 
