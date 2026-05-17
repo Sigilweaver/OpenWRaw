@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ATTRIBUTION.md`: tracks third-party notices for bundled data.
+- `publish.yml` GitHub Actions workflow: publishes the `openwraw` crate to
+  crates.io and the Python wheel to PyPI via OIDC Trusted Publishing on
+  every `v*` tag push.
+- `Cargo.lock` is now committed to the repository for reproducible builds.
+- `[project.urls]` added to `pyproject.toml` (Homepage, Documentation,
+  Repository, Changelog).
+
+### Changed
+
+- Removed `openwraw-cli` crate: the CLI added unnecessary complexity for a
+  library-focused project; the Python bindings (`openwraw-py`) cover
+  interactive exploration needs adequately.
+- CI migrated from WarpBuild runners to standard GitHub-hosted
+  (`ubuntu-latest`, `macos-latest`, `windows-latest`).
+
 ## [0.1.0] - 2026-05-16
 
 ### Added
@@ -21,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parsers for ancillary files: `_HEADER.TXT`, `_extern.inf`,
   `_FUNCTNS.INF`, `_FUNCnnn.IDX`, `_FUNCnnn.DAT`, `_CHROMS.INF`,
   `_CHROnnnn.DAT`.
-- `openwraw-cli` with `inspect` and `convert` (mzML) subcommands.
 - `openwraw-py` PyO3 Python bindings (`RawReader`, `read_spectrum`,
   `read_ims_spectrum`, `read_chrom`).
 - 69 unit and integration tests covering the core crate.

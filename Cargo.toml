@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/openwraw", "crates/openwraw-cli", "crates/openwraw-py"]
+members = ["crates/openwraw", "crates/openwraw-py"]
 
 [workspace.package]
 version = "0.1.0"
