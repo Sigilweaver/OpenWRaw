@@ -12,7 +12,7 @@ in the repository root. The notes below mirror the latest release.
 
 Initial release.
 
-- Rust workspace with `openwraw` (library), `openwraw-cli` (CLI), and
+- Rust workspace with `openwraw` (library) and
   `openwraw-py` (Python bindings via PyO3 + maturin).
 - Parsers for `_HEADER.TXT`, `_extern.inf`, `_FUNCTNS.INF`,
   `_FUNCnnn.IDX` (Variants A and B), `_FUNCnnn.DAT` (Encodings A, B,

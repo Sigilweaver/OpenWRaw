@@ -25,13 +25,6 @@ name = "openwraw"
 version = "0.1.0"
 
 [[package]]
-name = "openwraw-cli"
-version = "0.1.0"
-dependencies = [
- "openwraw",
-]
-
-[[package]]
 name = "openwraw-py"
 version = "0.1.0"
 dependencies = [

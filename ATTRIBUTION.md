@@ -34,7 +34,7 @@ the relevant accession.
 
 ## Third-party Rust dependencies
 
-The OpenWRaw core (`openwraw`) and CLI (`openwraw-cli`) crates have no
+The OpenWRaw core (`openwraw`) crate has no
 third-party runtime dependencies. The Python bindings crate (`openwraw-py`)
 adds:
 

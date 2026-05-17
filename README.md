@@ -49,19 +49,11 @@ spec = r.read_spectrum(1, 0)
 print(spec.mz[:5], spec.intensity[:5])
 ```
 
-CLI:
-
-```sh
-openwraw inspect path/to/sample.raw
-openwraw convert path/to/sample.raw -o output.mzML
-```
-
 ## Repository layout
 
 ```
 crates/
   openwraw/      Core Rust library (69 tests)
-  openwraw-cli/  CLI tool
   openwraw-py/   PyO3 / maturin Python bindings
 docs/            Docusaurus site (format spec + guides)
 ```
