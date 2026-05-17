@@ -9,10 +9,10 @@ Cross-referenced against `_extern.inf` "Scan Time" and "Interscan Time" fields a
 IDX retention-time sequences for all four corpus instruments.
 
 Corpus used:
-- **PXD058812** — Synapt HDMS (non-IMS QTOF mode), 1 function
-- **PXD066594/WANG.raw** — SYNAPT G2-Si IMS, 1 function
-- **PXD068881/CtpA** — SYNAPT G2-Si DDA, 3 functions
-- **PXD075602/DHPR** — Xevo G2-XS, 3 functions
+- **PXD058812** - Synapt HDMS (non-IMS QTOF mode), 1 function
+- **PXD066594/WANG.raw** - SYNAPT G2-Si IMS, 1 function
+- **PXD068881/CtpA** - SYNAPT G2-Si DDA, 3 functions
+- **PXD075602/DHPR** - Xevo G2-XS, 3 functions
 
 ## Record Layout (416 bytes per function, no file header)
 
@@ -24,19 +24,19 @@ All unlisted byte positions are zero in the entire corpus.
 | 0x001  | 1    | u8   | Partial   | scan_subtype: 0x25 = older non-IMS QTOF; 0x71 = G2-Si/G2-XS survey; 0xf1 = G2-Si/G2-XS lock-mass reference (= 0x71 | 0x80) |
 | 0x002  | 4    | f32  | Yes       | cycle_contribution (s) = scan_time + interscan_delay; confirmed as scan_time + interscan_delay for all 9 records |
 | 0x006  | 4    | f32  | Yes       | interscan_delay (s), duplicate of 0x01C |
-| 0x00A  | 6    | —    | —         | zero |
+| 0x00A  | 6    | -    | -         | zero |
 | 0x010  | 2    | u16  | Yes       | tof_depth: number of TDC bins per pusher pulse (e.g. 16672 for G2-Si at 69 µs, 17204 for older QTOF at 62 µs) |
-| 0x012  | 2    | —    | —         | zero |
-| 0x014  | 3    | —    | —         | zero |
+| 0x012  | 2    | -    | -         | zero |
+| 0x014  | 3    | -    | -         | zero |
 | 0x017  | 1    | u8   | Partial   | 0x01 in all corpus records; possibly continuum/centroid flag (1=continuum) or polarity (1=positive) |
-| 0x018  | 4    | —    | —         | zero |
-| 0x01C  | 4    | f32  | Yes       | interscan_delay (s) — idle time between end of one scan and start of next; matches `Interscan Time (sec)` in `_extern.inf` |
-| 0x020  | 4    | f32  | Yes       | scan_time (s) — data collection time per scan; matches `Scan Time (sec)` in `_extern.inf` |
-| 0x024  | 124  | —    | —         | zero |
-| 0x0A0  | 4    | f32  | Yes       | mz_low — mass range lower bound (m/z) |
-| 0x0A4  | 124  | —    | —         | zero |
-| 0x120  | 4    | f32  | Yes       | mz_high — mass range upper bound (m/z) |
-| 0x124  | 156  | —    | —         | zero |
+| 0x018  | 4    | -    | -         | zero |
+| 0x01C  | 4    | f32  | Yes       | interscan_delay (s) - idle time between end of one scan and start of next; matches `Interscan Time (sec)` in `_extern.inf` |
+| 0x020  | 4    | f32  | Yes       | scan_time (s) - data collection time per scan; matches `Scan Time (sec)` in `_extern.inf` |
+| 0x024  | 124  | -    | -         | zero |
+| 0x0A0  | 4    | f32  | Yes       | mz_low - mass range lower bound (m/z) |
+| 0x0A4  | 124  | -    | -         | zero |
+| 0x120  | 4    | f32  | Yes       | mz_high - mass range upper bound (m/z) |
+| 0x124  | 156  | -    | -         | zero |
 
 Total record size: 416 bytes.
 

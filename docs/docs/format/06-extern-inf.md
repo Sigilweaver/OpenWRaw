@@ -73,14 +73,14 @@ Present in all observed datasets. Key fields:
 
 | Field | Observed values | Description |
 |-------|----------------|-------------|
-| `Lteff` | 1800.0–1997.94 mm | Effective flight path length |
-| `Veff` | 6328.24–9100.0 V | Effective accelerating voltage |
-| `Resolution` | 4000–22000 | Nominal resolving power |
+| `Lteff` | 1800.0-1997.94 mm | Effective flight path length |
+| `Veff` | 6328.24-9100.0 V | Effective accelerating voltage |
+| `Resolution` | 4000-22000 | Nominal resolving power |
 | `Min Points in Peak` | 2 | Minimum peak points for centroiding |
 | `Acquisition Device` | `WatersADC` | ADC type (always seen) |
-| `PusherInterval` | 60.25–88.0 µs | Authoritative pusher cycle time |
-| `PusherOffset` | 0.0–0.25 µs | Pusher timing offset |
-| `EDC Delay Coefficient` | 1.33–1.40 | Enhanced Duty Cycle delay constant |
+| `PusherInterval` | 60.25-88.0 µs | Authoritative pusher cycle time |
+| `PusherOffset` | 0.0-0.25 µs | Pusher timing offset |
+| `EDC Delay Coefficient` | 1.33-1.40 | Enhanced Duty Cycle delay constant |
 | `EDC Delay Offset` | 0.40 µs | EDC delay offset |
 
 IMS-capable instruments (SYNAPT G2-Si) additionally have:
@@ -100,7 +100,7 @@ Contains per-run electrode voltages and source conditions. Key fields:
 
 | Field | Units | Description |
 |-------|-------|-------------|
-| `Polarity` | — | `ES+` or `ES-` (electrospray polarity) |
+| `Polarity` | - | `ES+` or `ES-` (electrospray polarity) |
 | `Capillary (kV)` | kV | Spray capillary voltage |
 | `Sampling Cone` | V | Cone voltage |
 | `Source Temperature (°C)` | °C | Desolvation source temp |
@@ -118,10 +118,10 @@ One section per MS function. Format:
 `Function Parameters - Function N - <TYPE>`
 
 where `TYPE` is one of:
-- `TOF MS FUNCTION` — standard MS1 or MS2 survey scan
-- `TOF PARENT FUNCTION` — survey + auto-MS/MS (DDA)
-- `TOF PRODUCT FUNCTION` — MS/MS fragment scan
-- `TOF CALIBRATION FUNCTION` — lock-mass reference channel
+- `TOF MS FUNCTION` - standard MS1 or MS2 survey scan
+- `TOF PARENT FUNCTION` - survey + auto-MS/MS (DDA)
+- `TOF PRODUCT FUNCTION` - MS/MS fragment scan
+- `TOF CALIBRATION FUNCTION` - lock-mass reference channel
 
 Key per-function fields:
 
@@ -133,11 +133,11 @@ Key per-function fields:
 | `End Time (mins)` | min | Acquisition end retention time |
 | `Scan Time (sec)` | s | Duration of one scan |
 | `Interscan Time (sec)` | s | Dead time between scans |
-| `Data Format` | — | `Continuum` or `Centroid` |
-| `Analyser` | — | `Resolution Mode` or `Sensitivity Mode` |
+| `Data Format` | - | `Continuum` or `Centroid` |
+| `Analyser` | - | `Resolution Mode` or `Sensitivity Mode` |
 | `ADC Sample Frequency (GHz)` | GHz | ADC sampling rate |
 | `ADC Pusher Frequency (µs)` | µs | Per-function pusher cycle override (if set) |
-| `Calibration` | — | Calibration mode: `Dynamic 2` = lock-mass, `Static` = fixed |
+| `Calibration` | - | Calibration mode: `Dynamic 2` = lock-mass, `Static` = fixed |
 
 ## Version Line
 

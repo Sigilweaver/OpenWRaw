@@ -22,11 +22,11 @@ at preamble byte 0.
 
 | Offset | Type | Description |
 |--------|------|-------------|
-| 0x00   | u16  | `data_offset` — byte offset where per-scan data begins |
+| 0x00   | u16  | `data_offset` - byte offset where per-scan data begins |
 | 0x02   | u16  | Format version (always 1 observed) |
-| 0x04   | u16  | `scan_record_size` — bytes per scan in the data section |
-| 0x06   | u16  | `n_desc` — number of descriptor records |
-| 0x08–0x1F | — | Zeroes (padding to 32 bytes) |
+| 0x04   | u16  | `scan_record_size` - bytes per scan in the data section |
+| 0x06   | u16  | `n_desc` - number of descriptor records |
+| 0x08-0x1F | - | Zeroes (padding to 32 bytes) |
 
 Equations:
 - `data_offset = 32 + n_desc * 48`
@@ -45,7 +45,7 @@ Each descriptor defines one channel stored in the per-scan data section.
 | 0x00 | u16 | Channel sequence number (not always contiguous; some skip) |
 | 0x02 | u16 | Encoding type (see table below) |
 | 0x04 | u16 | Byte offset of this channel within each scan record |
-| 0x06–0x2F | bytes | Null-padded ASCII channel name (42 bytes) |
+| 0x06-0x2F | bytes | Null-padded ASCII channel name (42 bytes) |
 
 ### Encoding Types
 
@@ -100,7 +100,7 @@ descriptor list rather than assuming fixed offsets.
 
 | Dataset | n_desc | scan_sz | Cone | Collision Energy | Push Count |
 |---------|--------|---------|------|-----------------|------------|
-| PXD058812 P15 (non-IMS QTOF) | 25 | 63 | 30 V | 10.0 eV | — |
+| PXD058812 P15 (non-IMS QTOF) | 25 | 63 | 30 V | 10.0 eV | - |
 | PXD075602 DHPR (Xevo G2-XS) | 56 | 167 | 30 V | 4.0 eV | 8299 |
 
 Push Count = 8299 in DHPR: 8299 × 60.25 µs ≈ 0.50 s per scan, consistent

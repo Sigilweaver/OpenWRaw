@@ -27,7 +27,7 @@ method, calibration state, and all acquired spectra.
 | `APEXnnnDIONS.CSV` | CSV | **Fully known** | Apex3D ion list: m/z, RT, intensity, drift time per detected 3D peak |
 
 Files without a number suffix appear once per `.raw` directory. Files with
-`nnn` are numbered 001–099, one per MS function.
+`nnn` are numbered 001-099, one per MS function.
 
 ## Function Concept
 
@@ -37,7 +37,7 @@ typical experiment structure:
 | Experiment type | Functions |
 |-----------------|-----------|
 | MS survey only | Function 1 = MS1 |
-| DDA (auto-MS/MS) | Function 1 = survey, Functions 2–N = triggered MS/MS |
+| DDA (auto-MS/MS) | Function 1 = survey, Functions 2-N = triggered MS/MS |
 | IMS-MS (HDMS) | Function 1 = IMS-MS, Function 2 = reference/lock-mass |
 | Lock-mass reference | Last function = calibrant channel |
 
@@ -140,7 +140,7 @@ _CHROMS.INF uses a 128-byte header + 85-byte records (different stride).
 
 | Accession | Instrument | Notes |
 |-----------|-----------|-------|
-| PXD058812 | Q-TOF (non-IMS) | 3 small files, Encoding A, 197–426 scans |
+| PXD058812 | Q-TOF (non-IMS) | 3 small files, Encoding A, 197-426 scans |
 | PXD066594 | SYNAPT G2-Si IMS | WANG.raw, 590 scans, large IMS data |
 | PXD068881 | SYNAPT G2-Si IMS | CtpA LC-MS, 1138 scans, has CHROMS.INF |
 | PXD075602 | Xevo G2-XS QTof | DHPR LC-MS, 3 functions, Encoding C |

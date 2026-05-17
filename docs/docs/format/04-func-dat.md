@@ -61,7 +61,7 @@ Validated: PXD058812/molecular_mass_P15_01.raw scan 5 (RT=0.12 min).
 Strongest peaks at m/z ≈ 1693-1846 Da, consistent with a native MS protein (charge state envelope
 matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705 Da).
 
-## Encoding B: 8-byte records (IMS mode — SYNAPT G2-Si)
+## Encoding B: 8-byte records (IMS mode - SYNAPT G2-Si)
 
 ### Status: Decoded and Validated (Phase 4)
 
@@ -153,7 +153,7 @@ Expected m/z=122.08 (from Apex3DIons.csv accession), decoded mz_raw≈121.67-122
 records at tof_bin=16191-16195 using the sentinel-derived t_bin=4.62 ns. After
 calibration polynomial the decoded m/z converges to the Apex3D-reported value.
 
-## Encoding C: 8-byte records (non-IMS QTof mode — Xevo G2-XS)
+## Encoding C: 8-byte records (non-IMS QTof mode - Xevo G2-XS)
 
 ### Status: Decoded and Validated (Phase 3)
 
@@ -243,6 +243,6 @@ In practice, IMS datasets always have `_PROC*.DAT/IDX/STS` files or Apex3D outpu
 - Corpus samples:
   - PXD058812/molecular_mass_P15_01.raw (Encoding A, 197 scans, ~1050 rec/scan)
   - PXD058812/MS_fragmentation_P29_01.raw (Encoding A, 426 scans)
-  - PXD066594/WANG.raw (Encoding B, 590 scans, 79616–98080 rec/scan)
+  - PXD066594/WANG.raw (Encoding B, 590 scans, 79616-98080 rec/scan)
   - PXD068881/20220517_CtpA_1076_2h_1.raw (Encoding B, 1138 scans)
-  - PXD075602/DHPR_11257-1.raw (Encoding C, 1150 scans, 722–127486 rec/scan)
+  - PXD075602/DHPR_11257-1.raw (Encoding C, 1150 scans, 722-127486 rec/scan)

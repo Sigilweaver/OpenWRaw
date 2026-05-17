@@ -24,11 +24,11 @@ is always 0x80 = 128.
 
 | Offset | Type | Value | Description |
 |--------|------|-------|-------------|
-| 0x00 | u16 | 0x0080 (128) | data_offset — byte offset to first data record |
+| 0x00 | u16 | 0x0080 (128) | data_offset - byte offset to first data record |
 | 0x02 | u16 | 1 | Format version |
 | 0x04 | u16 | 8 | Bytes per data record |
 | 0x06 | u16 | 2 | Number of descriptor records (always 2) |
-| 0x08–0x1F | — | zeroes | Padding |
+| 0x08-0x1F | - | zeroes | Padding |
 
 ## Descriptor Records
 
@@ -47,7 +47,7 @@ Both are always present with the same structure (unk=3 = f32 encoding):
 | 4 | f32 | Channel value in instrument-specific units |
 
 The sampling rate is independent of the MS scan rate. LC channels are
-typically sampled at 1–10 Hz; the number of CHRO records per MS scan
+typically sampled at 1-10 Hz; the number of CHRO records per MS scan
 varies accordingly.
 
 ## CHRO File Numbering
@@ -68,10 +68,10 @@ files correspond to the "Flags" and "Description" meta records.
 
 | File | Dataset | Channel | n_records | RT range (min) | Value range |
 |------|---------|---------|-----------|----------------|-------------|
-| CHRO001 | CtpA.raw | (meta Flags) | 7201 | 0.002–12.002 | 4753–6782 |
-| CHRO002 | CtpA.raw | (meta Desc) | 721 | 0.017–12.017 | 94.7–95.0 (%) |
-| CHRO001 | DHPR_11257-1.raw | BSM Flow Rate B | 18001 | 0.002–30.006 | 3580–3650 (µL/min) |
-| CHRO002 | DHPR_11257-1.raw | Column Temp | 1801 | 0.017–30.016 | 4.8–5.0 (°C) |
+| CHRO001 | CtpA.raw | (meta Flags) | 7201 | 0.002-12.002 | 4753-6782 |
+| CHRO002 | CtpA.raw | (meta Desc) | 721 | 0.017-12.017 | 94.7-95.0 (%) |
+| CHRO001 | DHPR_11257-1.raw | BSM Flow Rate B | 18001 | 0.002-30.006 | 3580-3650 (µL/min) |
+| CHRO002 | DHPR_11257-1.raw | Column Temp | 1801 | 0.017-30.016 | 4.8-5.0 (°C) |
 
 Note: the CHRO001 values for CtpA (~6782) appear to represent BSM system
 pressure (psi), suggesting the meta "Flags" channel may record a real

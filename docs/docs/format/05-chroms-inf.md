@@ -33,7 +33,7 @@ Validated: PXD075602 DHPR_11257-1.raw _CHROMS.INF = 553 bytes = 128 + 5×85 (5 r
 | 0x02   | u16  | 1     | Format version (always 1 observed) |
 | 0x04   | u16  | 0x0055 (85) | Record size in bytes |
 | 0x06   | u16  | 2     | Number of meta records that follow (always 2 observed) |
-| 0x08–0x7F | zeroes | — | Padding to 128 bytes |
+| 0x08-0x7F | zeroes | - | Padding to 128 bytes |
 
 ## Meta Records (85 bytes each, always 2 records)
 
@@ -42,7 +42,7 @@ The two meta records immediately follow the header at offsets 0x80 and 0xD5.
 | Offset within record | Type | Description |
 |---------------------|------|-------------|
 | 0x00                | u32  | Meta type: 1 = Flags, 2 = Description |
-| 0x04–0x54           | bytes | Null-padded ASCII name string |
+| 0x04-0x54           | bytes | Null-padded ASCII name string |
 
 Observed names:
 - Type 1 (Flags): `"Flags"`
@@ -59,7 +59,7 @@ Each record describes one recorded chromatographic channel.
 | 0x04   | bytes | **Yes**  | Null-padded ASCII channel name (Windows-1252; may start with 0xB5 = µ) |
 | ...    | str  | **Yes**   | `$CC$` spec string (null-terminated, at end of record) |
 
-The channel name and `$CC$` string are packed into bytes 0x04–0x54 in sequence,
+The channel name and `$CC$` string are packed into bytes 0x04-0x54 in sequence,
 separated by a null byte between them.
 
 ### `$CC$` Spec String Format
@@ -74,7 +74,7 @@ $CC$,<scale_f>,<type_code>,<lo_limit>,<hi_limit>,<units>
 - `hi_limit` = upper display limit (float)
 - `units` = ASCII units string (e.g. `psi`, `%`, `uL/min`, `% Power`, `C`)
 
-### Observed Channels (PXD068881 CtpA.raw — 5 data records)
+### Observed Channels (PXD068881 CtpA.raw - 5 data records)
 
 | Record | source_type | Channel Name | units |
 |--------|-------------|--------------|-------|
@@ -84,7 +84,7 @@ $CC$,<scale_f>,<type_code>,<lo_limit>,<hi_limit>,<units>
 | 3      | 1 (col/samp)| (1) Peltier Engine Power | % Power |
 | 4      | 1 (col/samp)| (1) Chamber Temp         | °C |
 
-### Observed Channels (PXD075602 DHPR_11257-1.raw — 3 data records)
+### Observed Channels (PXD075602 DHPR_11257-1.raw - 3 data records)
 
 | Record | source_type | Channel Name | units |
 |--------|-------------|--------------|-------|

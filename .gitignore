@@ -23,7 +23,7 @@ uv.lock
 *.swo
 .idea/
 
-# ── Corpus data (large binary files – stored separately) ─────────────────────
+# ── Corpus data (large binary files - stored separately) ─────────────────────
 corpus/PXD*/
 corpus/index.csv
 
