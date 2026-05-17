@@ -20,11 +20,11 @@ Public types live under `openwraw::raw`:
 
 | Module          | Purpose                                        |
 | --------------- | ---------------------------------------------- |
-| `header`        | `_HEADER.TXT` -- metadata + calibration        |
-| `extern_inf`    | `_extern.inf` -- instrument geometry           |
-| `functions_inf` | `_FUNCTNS.INF` -- function descriptors         |
-| `index`         | `_FUNCnnn.IDX` -- scan index (Variant A / B)   |
-| `data`          | `_FUNCnnn.DAT` -- spectrum decoders            |
+| `header`        | `_HEADER.TXT` - metadata + calibration        |
+| `extern_inf`    | `_extern.inf` - instrument geometry           |
+| `functions_inf` | `_FUNCTNS.INF` - function descriptors         |
+| `index`         | `_FUNCnnn.IDX` - scan index (Variant A / B)   |
+| `data`          | `_FUNCnnn.DAT` - spectrum decoders            |
 | `chroms`        | `_CHROMS.INF` + `_CHROnnnn.DAT`                |
 
 The high-level `RawReader` glues these together; for byte-level access

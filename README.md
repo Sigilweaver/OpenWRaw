@@ -10,7 +10,7 @@ Rust and Python reader for the Waters MassLynx RAW mass spectrometry
 data format. Cross-platform (Linux, macOS, Windows), with no native or
 system dependencies.
 
-Full documentation: <https://sigilweaver.app/openwraw/docs>
+Full documentation: [sigilweaver.app/openwraw/docs](https://sigilweaver.app/openwraw/docs)
 
 ## Install
 
@@ -48,6 +48,9 @@ r = openwraw.RawReader("sample.raw")
 spec = r.read_spectrum(1, 0)
 print(spec.mz[:5], spec.intensity[:5])
 ```
+
+See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
+quickstart, guide, and format specification.
 
 ## Repository layout
 

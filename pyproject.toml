@@ -19,6 +19,11 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 manifest-path = "crates/openwraw-py/Cargo.toml"
+include = [
+    { path = "LICENSE", format = "sdist" },
+    { path = "README.md", format = "sdist" },
+    { path = "CHANGELOG.md", format = "sdist" },
+]
 
 [project.urls]
 Homepage = "https://sigilweaver.app/openwraw/"
