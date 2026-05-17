@@ -65,7 +65,7 @@ matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705
 
 ### Status: Decoded and Validated (Phase 4)
 
-Observed in: PXD066594 (WANG.raw), PXD068881 (CtpA) -- both SYNAPT G2-Si
+Observed in: PXD066594 (WANG.raw), PXD068881 (CtpA) - both SYNAPT G2-Si
 
 Key facts:
 - File is a flat array of 8-byte records with NO embedded scan headers

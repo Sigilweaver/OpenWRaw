@@ -14,7 +14,7 @@ Observed in: PXD058812 (Waters QTOF, native MS, no ion mobility)
 
 Key facts:
 - File size = N x 22 bytes (exact, no header)
-- u32@0x00 = DAT byte offset -- confirmed
+- u32@0x00 = DAT byte offset - confirmed
 - Scan 0-2 are often zero-data "blank" scans (12 bytes each in DAT)
 
 | Offset | Type | Confirmed | Description |
@@ -49,7 +49,7 @@ Observed in:
 
 Key facts:
 - File size = N x 30 bytes (exact, no header)
-- DAT byte offset stored at +0x16 (NOT +0x00) -- confirmed for all three datasets
+- DAT byte offset stored at +0x16 (NOT +0x00) - confirmed for all three datasets
 - Scan sizes vary depending on ion density
 - Total records check: sum(scan_sizes) / 8 = DAT_size / 8 exactly (flat 8-byte record array)
 - The Xevo G2-XS QTof (non-IMS) uses this variant despite having no drift dimension;
