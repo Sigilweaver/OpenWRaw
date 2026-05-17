@@ -26,7 +26,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.75"
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -54,8 +53,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.75"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -64,11 +61,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Create virtualenv
+        run: python -m venv .venv
+
       - name: Install maturin
-        run: pip install maturin
+        run: .venv/bin/pip install maturin
 
       - name: Build extension
-        run: maturin develop --release
+        run: .venv/bin/maturin develop --release
 
       - name: Smoke import
-        run: python -c "import openwraw; print(openwraw.__name__)"
+        run: .venv/bin/python -c "import openwraw; print(openwraw.__name__)"
