@@ -17,5 +17,6 @@ workspace = true
 
 [dependencies]
 openproteo-core = { workspace = true }
+thiserror = "2"
 
 [dev-dependencies]
