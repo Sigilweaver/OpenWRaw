@@ -5,9 +5,11 @@
 //!
 //! * One mzML spectrum per scan in each non-lock-mass function.
 //! * Encoding A / C (non-IMS QTof): peaks are emitted as-is.
-//! * Encoding B (SYNAPT IMS): all drift bins are pooled into a single MS
-//!   spectrum per scan (sorted by m/z, intensities summed across drift
-//!   bins). The drift dimension is dropped for now.
+//! * Encoding B (SYNAPT IMS): every drift bin contributes its own peak,
+//!   with a parallel drift-time array emitted alongside m/z and intensity
+//!   (MS:1003007 "raw ion mobility array", milliseconds). The `pool_ims`
+//!   helper for m/z pooling stays available for downstream tools that
+//!   want a single spectrum per scan.
 //! * Native ID format mirrors the de-facto Waters convention used by
 //!   ProteoWizard / Wiff2: `function=F process=0 scan=S` (1-based S).
 //! * Lock-mass / reference functions are skipped.
@@ -56,11 +58,13 @@ fn instrument_cv(name: &str) -> msc::CvTerm {
     msc::CvTerm::new("MS:1000126", "Waters instrument model")
 }
 
-fn polarity_for(_function_index: u32) -> Option<msc::Polarity> {
-    // Waters polarity lives in _extern.inf per function; the current
-    // ExternInf parser does not yet surface it. Leave unset rather than
-    // guess.
-    None
+fn polarity_for(reader: &Reader, _function_index: u32) -> Option<msc::Polarity> {
+    // Waters records electrospray polarity once per run in _extern.inf.
+    match reader.extern_inf.polarity {
+        Some(crate::raw::extern_inf::Polarity::Positive) => Some(msc::Polarity::Positive),
+        Some(crate::raw::extern_inf::Polarity::Negative) => Some(msc::Polarity::Negative),
+        None => None,
+    }
 }
 
 fn native_id_for(function_index: u32, scan_idx_zero_based: usize) -> String {
@@ -90,6 +94,7 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         software_name: SOFTWARE_NAME.into(),
         software_version: SOFTWARE_VERSION.into(),
         start_timestamp,
+        mobility_array_kind: Some(msc::MobilityArrayKind::DriftTimeMilliseconds),
     }
 }
 
@@ -97,7 +102,9 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
 ///
 /// Sorts the (m/z, intensity) pairs by m/z and sums intensities that fall
 /// on the same m/z bin (after the encoder's 1/65536 sub-bin resolution).
-fn pool_ims(ims: &ImsSpectrum) -> (Vec<f64>, Vec<f32>) {
+/// Available for downstream tools that want a single MS spectrum per scan;
+/// the default export path emits the drift-resolved peaks instead.
+pub fn pool_ims(ims: &ImsSpectrum) -> (Vec<f64>, Vec<f32>) {
     let n = ims.mz.len();
     let mut pairs: Vec<(f64, f32)> = Vec::with_capacity(n);
     for i in 0..n {
@@ -122,8 +129,18 @@ fn pool_ims(ims: &ImsSpectrum) -> (Vec<f64>, Vec<f32>) {
 }
 
 fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
-    // Without a robust MS/MS marker in the current _extern.inf parser,
-    // treat function 1 as MS1 and every other survey function as MS2.
+    // Prefer unambiguous mode labels from the _extern.inf section
+    // header; for `TOF PARENT` (which Waters uses for both low-energy
+    // MS1 and high-energy fragment scans in MSe / HDMSe) and for
+    // unknown labels, fall back to the function-index heuristic.
+    use crate::raw::extern_inf::FunctionMode;
+    if let Some(f) = reader.extern_inf.functions.get(&function_index) {
+        match f.mode {
+            FunctionMode::Ms | FunctionMode::Reference => return 1,
+            FunctionMode::Msms | FunctionMode::Daughter => return 2,
+            FunctionMode::MseParent | FunctionMode::Unknown => {}
+        }
+    }
     if function_index == 1 || reader.functions.len() == 1 {
         1
     } else {
@@ -132,17 +149,19 @@ fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
 }
 
 /// Collect every decoded scan in a bundle into `mass_spec_core` records.
-fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
+pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
     let mut out: Vec<msc::SpectrumRecord> = Vec::with_capacity(reader.total_scan_count());
     let mut scan_counter: u32 = 0;
     for decoded in reader.iter_spectra() {
         let scan = decoded?;
         scan_counter += 1;
-        let (mz, intensity) = match &scan.spectrum {
-            DecodedSpectrum::Plain(s) => (s.mz.clone(), s.intensity.clone()),
-            DecodedSpectrum::Ims(ims) => pool_ims(ims),
+        let (mz, intensity, mobility) = match &scan.spectrum {
+            DecodedSpectrum::Plain(s) => (s.mz.clone(), s.intensity.clone(), None),
+            DecodedSpectrum::Ims(ims) => {
+                let mob: Vec<f32> = ims.drift_time_ms.iter().map(|&d| d as f32).collect();
+                (ims.mz.clone(), ims.intensity.clone(), Some(mob))
+            }
         };
-        let n = mz.len();
         let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
         let ms_level = ms_level_for_function(reader, scan.function_index);
         out.push(msc::SpectrumRecord {
@@ -150,7 +169,7 @@ fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
             scan_number: scan_counter,
             native_id: native_id_for(scan.function_index, scan.scan_idx),
             ms_level,
-            polarity: polarity_for(scan.function_index),
+            polarity: polarity_for(reader, scan.function_index),
             scan_mode: Some(msc::ScanMode::Centroid),
             analyzer: Some(msc::Analyzer::TOFMS),
             filter: None,
@@ -165,9 +184,8 @@ fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
             precursor: None,
             mz,
             intensity,
-            inv_mobility_per_peak: None,
+            inv_mobility_per_peak: mobility,
         });
-        let _ = n;
     }
     Ok(out)
 }

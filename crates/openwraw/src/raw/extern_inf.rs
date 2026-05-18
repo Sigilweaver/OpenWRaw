@@ -9,6 +9,68 @@ use std::path::Path;
 const M_PROTON_KG: f64 = 1.672_621_9e-27;
 const E_COULOMBS: f64 = 1.602_176_6e-19;
 
+/// Electrospray polarity, parsed from the `Polarity` row of `_extern.inf`.
+///
+/// The file uses two conventions across instrument generations:
+/// `ES+` / `ES-` and `Positive` / `Negative`. Both are accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    Positive,
+    Negative,
+}
+
+/// Acquisition mode of a function, derived from the section-header tail in
+/// `_extern.inf` (`Function Parameters - Function N - <TAIL>`).
+///
+/// Examples observed in the workspace corpus:
+/// `TOF MS FUNCTION`, `TOF PARENT FUNCTION`,
+/// `TOF MSMS FUNCTION`, `TOF DAUGHTER FUNCTION`, `REFERENCE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionMode {
+    /// MS1 survey scan (`TOF MS`).
+    Ms,
+    /// MSe / HD-MSe high-energy ramp scan (`TOF PARENT`).
+    MseParent,
+    /// Targeted MS/MS scan (`TOF MSMS`).
+    Msms,
+    /// DDA fragment scan (`TOF DAUGHTER`).
+    Daughter,
+    /// Lock-mass / reference (`REFERENCE`).
+    Reference,
+    /// Section header recognised but mode not classified.
+    Unknown,
+}
+
+impl FunctionMode {
+    /// MS level conventionally written to mzML for this mode.
+    ///
+    /// `Ms` and `Reference` are MS1; everything else is MS2 (MSe / DDA /
+    /// targeted MS/MS all carry fragment ions in mzML semantics).
+    pub fn ms_level(self) -> u32 {
+        match self {
+            Self::Ms | Self::Reference | Self::Unknown => 1,
+            Self::MseParent | Self::Msms | Self::Daughter => 2,
+        }
+    }
+
+    fn from_section_tail(tail: &str) -> Self {
+        let t = tail.to_ascii_uppercase();
+        if t.contains("REFERENCE") {
+            Self::Reference
+        } else if t.contains("DAUGHTER") {
+            Self::Daughter
+        } else if t.contains("MSMS") {
+            Self::Msms
+        } else if t.contains("PARENT") {
+            Self::MseParent
+        } else if t.contains("TOF MS") {
+            Self::Ms
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
 /// Per-function acquisition parameters extracted from a
 /// `Function Parameters - Function N - TYPE` section.
 #[derive(Debug, Clone)]
@@ -19,9 +81,11 @@ pub struct ExternFunction {
     pub start_mass_da: f64,
     /// Acquisition m/z upper limit (Da).
     pub end_mass_da: f64,
-    /// Per-function pusher interval override (µs) from `ADC Pusher Frequency`.
+    /// Per-function pusher interval override (us) from `ADC Pusher Frequency`.
     /// `None` when not present; fall back to `ExternInf::pusher_interval_us`.
     pub pusher_interval_us: Option<f64>,
+    /// Acquisition mode derived from the section-header tail.
+    pub mode: FunctionMode,
 }
 
 /// Parsed contents of a Waters `_extern.inf` file.
@@ -31,11 +95,14 @@ pub struct ExternInf {
     pub lteff_mm: f64,
     /// Effective accelerating voltage (V).
     pub veff_v: f64,
-    /// Global pusher interval (µs).
+    /// Global pusher interval (us).
     ///
     /// Sourced from `PusherInterval` (newer instruments) or
     /// `Pusher Cycle Time` (older instruments; "Automatic" is ignored).
     pub pusher_interval_us: f64,
+    /// Electrospray polarity, parsed from the `Polarity` field.
+    /// `None` when the field is absent or unparseable.
+    pub polarity: Option<Polarity>,
     /// Per-function parameters keyed by 1-based function index.
     pub functions: BTreeMap<u32, ExternFunction>,
 }
@@ -84,6 +151,7 @@ impl std::str::FromStr for ExternInf {
 
         let mut current_func: Option<u32> = None;
         let mut functions: BTreeMap<u32, ExternFunction> = BTreeMap::new();
+        let mut polarity: Option<Polarity> = None;
 
         for line in s.lines() {
             let trimmed = line.trim();
@@ -95,14 +163,18 @@ impl std::str::FromStr for ExternInf {
             // These do NOT end with ':'.
             if let Some(rest) = trimmed.strip_prefix("Function Parameters - Function ") {
                 // rest = "1 - TOF MS FUNCTION" or similar
-                let n_str = rest.split_whitespace().next().unwrap_or("");
-                if let Ok(n) = n_str.trim_end_matches('-').trim().parse::<u32>() {
+                let mut parts = rest.splitn(2, '-');
+                let n_str = parts.next().unwrap_or("").trim();
+                let tail = parts.next().unwrap_or("").trim();
+                if let Ok(n) = n_str.parse::<u32>() {
                     current_func = Some(n);
+                    let mode = FunctionMode::from_section_tail(tail);
                     functions.entry(n).or_insert(ExternFunction {
                         index: n,
                         start_mass_da: 0.0,
                         end_mass_da: 0.0,
                         pusher_interval_us: None,
+                        mode,
                     });
                 }
                 continue;
@@ -175,6 +247,15 @@ impl std::str::FromStr for ExternInf {
                         }
                     }
                 }
+                "Polarity" => {
+                    // Accept ES+/ES-/Positive/Negative (case insensitive).
+                    let v = value_str.to_ascii_uppercase();
+                    if v.starts_with("ES+") || v.starts_with("POS") {
+                        polarity.get_or_insert(Polarity::Positive);
+                    } else if v.starts_with("ES-") || v.starts_with("NEG") {
+                        polarity.get_or_insert(Polarity::Negative);
+                    }
+                }
                 _ => {}
             }
         }
@@ -194,6 +275,7 @@ impl std::str::FromStr for ExternInf {
             lteff_mm,
             veff_v,
             pusher_interval_us,
+            polarity,
             functions,
         })
     }
