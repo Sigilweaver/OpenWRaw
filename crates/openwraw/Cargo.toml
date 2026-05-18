@@ -16,6 +16,6 @@ readme = "../../README.md"
 workspace = true
 
 [dependencies]
-mass-spec-core = { workspace = true }
+openproteo-core = { workspace = true }
 
 [dev-dependencies]
