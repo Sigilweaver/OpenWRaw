@@ -1,4 +1,8 @@
+pub mod mzml;
 pub mod raw;
+pub mod reader;
+
+pub use reader::{DecodedScan, DecodedSpectrum, Encoding, FunctionEntry, Reader};
 
 #[derive(Debug)]
 pub enum Error {
