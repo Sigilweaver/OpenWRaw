@@ -5,6 +5,16 @@ slug: /
 
 # OpenWRaw
 
+:::info Part of the OpenProteo stack
+
+OpenWRaw is one of the vendor readers in
+[OpenProteo](https://sigilweaver.app/openproteo/docs/), a Rust- and
+Python-native stack for proteomics raw-file access. Sibling readers:
+[OpenTFRaw](https://sigilweaver.app/opentfraw/docs/) (Thermo `.raw`),
+[OpenTimsTDF](https://sigilweaver.app/opentdf/docs/) (Bruker `.d/`).
+
+:::
+
 OpenWRaw is a Rust library that reads Waters MassLynx `.raw`
 acquisition directories - the directory-based format produced by
 Waters LC-MS instruments (Synapt, Xevo, ACQUITY, and related product

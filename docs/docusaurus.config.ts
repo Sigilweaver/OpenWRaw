@@ -76,6 +76,11 @@ const config: Config = {
           label: 'Docs',
         },
         {
+          href: 'https://sigilweaver.app/openproteo/docs/',
+          label: 'OpenProteo',
+          position: 'left',
+        },
+        {
           href: 'https://docs.rs/openwraw',
           label: 'API (docs.rs)',
           position: 'right',
