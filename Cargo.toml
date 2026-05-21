@@ -15,7 +15,7 @@ categories = ["parser-implementations", "science"]
 
 [workspace.dependencies]
 openwraw = { path = "crates/openwraw" }
-openproteo-core = { path = "../OpenProteoCore", version = "0.1.0" }
+openproteo-core = "0.1.0"
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
 
 [workspace.lints.rust]
