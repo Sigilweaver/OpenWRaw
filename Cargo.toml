@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/openwraw", "crates/openwraw-py"]
 
 [workspace.package]
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Nathan Riley <git@nathanriley.com>"]
@@ -15,7 +15,7 @@ categories = ["parser-implementations", "science"]
 
 [workspace.dependencies]
 openwraw = { path = "crates/openwraw" }
-openproteo-core = { path = "../OpenProteoCore" }
+openproteo-core = { path = "../OpenProteoCore", version = "0.1.0" }
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
 
 [workspace.lints.rust]
