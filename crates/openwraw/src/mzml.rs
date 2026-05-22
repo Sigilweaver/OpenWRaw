@@ -81,11 +81,12 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         .instrument
         .clone()
         .unwrap_or_else(|| "Waters".into());
-    let start_timestamp = reader
-        .header
-        .acquired_date
-        .as_deref()
-        .map(|d| format!("{d} {}", reader.header.acquired_time.as_deref().unwrap_or("")));
+    let start_timestamp = reader.header.acquired_date.as_deref().map(|d| {
+        format!(
+            "{d} {}",
+            reader.header.acquired_time.as_deref().unwrap_or("")
+        )
+    });
     msc::RunMetadata {
         source_file_name: reader.bundle_name.clone(),
         source_file_format: source_file_format_cv(),
@@ -215,13 +216,7 @@ fn summarize_arrays(
             hi = *m;
         }
     }
-    (
-        tic,
-        Some(bp_mz),
-        Some(bp_int as f64),
-        Some(lo),
-        Some(hi),
-    )
+    (tic, Some(bp_mz), Some(bp_int as f64), Some(lo), Some(hi))
 }
 
 /// `SpectrumSource` adapter that owns a [`Reader`]. All spectra are decoded

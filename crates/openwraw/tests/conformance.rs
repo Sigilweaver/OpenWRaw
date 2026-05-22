@@ -33,6 +33,10 @@ fn openwraw_conformance() {
     let total = records.len();
     let n = assert_iter_invariants(records).expect("conformance");
     assert_eq!(n, total);
-    assert!(n > 0, "expected at least one spectrum from {}", dir.display());
+    assert!(
+        n > 0,
+        "expected at least one spectrum from {}",
+        dir.display()
+    );
     eprintln!("openwraw: {n} spectra passed conformance");
 }
