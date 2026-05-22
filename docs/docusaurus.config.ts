@@ -77,7 +77,7 @@ const config: Config = {
         },
         {
           type: 'dropdown',
-          label: 'Projects',
+          label: 'OpenWRaw',
           position: 'left',
           items: [
             { label: 'All Docs', href: 'https://sigilweaver.app/docs/' },
