@@ -9,7 +9,7 @@
 > Part of the [OpenProteo](https://sigilweaver.app/openproteo/docs/)
 > stack for proteomics raw-file access. Sibling readers:
 > [OpenTFRaw](https://github.com/Sigilweaver/OpenTFRaw) (Thermo),
-> [OpenTimsTDF](https://github.com/Sigilweaver/OpenTDF) (Bruker).
+> [OpenTimsTDF](https://github.com/Sigilweaver/OpenTimsTDF) (Bruker).
 
 Rust and Python reader for the Waters MassLynx RAW mass spectrometry
 data format. Cross-platform (Linux, macOS, Windows), with no native or

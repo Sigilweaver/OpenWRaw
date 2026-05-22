@@ -11,7 +11,7 @@ OpenWRaw is one of the vendor readers in
 [OpenProteo](https://sigilweaver.app/openproteo/docs/), a Rust- and
 Python-native stack for proteomics raw-file access. Sibling readers:
 [OpenTFRaw](https://sigilweaver.app/opentfraw/docs/) (Thermo `.raw`),
-[OpenTimsTDF](https://sigilweaver.app/opentdf/docs/) (Bruker `.d/`).
+[OpenTimsTDF](https://sigilweaver.app/OpenTimsTDF/docs/) (Bruker `.d/`).
 
 :::
 
