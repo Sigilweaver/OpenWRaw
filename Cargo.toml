@@ -9,7 +9,8 @@ rust-version = "1.85"
 authors = ["Nathan Riley <git@nathanriley.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/Sigilweaver/OpenWRaw"
-homepage = "https://github.com/Sigilweaver/OpenWRaw"
+homepage = "https://sigilweaver.app/openwraw/"
+documentation = "https://sigilweaver.app/openwraw/docs/"
 keywords = ["mass-spectrometry", "waters", "masslynx", "raw", "proteomics"]
 categories = ["parser-implementations", "science"]
 
