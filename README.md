@@ -3,8 +3,9 @@
 [![CI](https://github.com/Sigilweaver/OpenWRaw/actions/workflows/ci.yml/badge.svg)](https://github.com/Sigilweaver/OpenWRaw/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/openwraw.svg)](https://crates.io/crates/openwraw)
 [![PyPI](https://img.shields.io/pypi/v/openwraw.svg)](https://pypi.org/project/openwraw/)
-[![docs.rs](https://docs.rs/openwraw/badge.svg)](https://docs.rs/openwraw)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![docs.rs](https://img.shields.io/docsrs/openwraw)](https://docs.rs/openwraw)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 > Part of the [OpenProteo](https://sigilweaver.app/openproteo/docs/)
 > stack for proteomics raw-file access. Sibling readers:
