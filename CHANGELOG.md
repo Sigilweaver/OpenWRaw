@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.1.0] - 2026-05-31
+
+### Added
+
+- `CITATION.cff`: author identity (Nathan Riley + ORCID) and a
+  scaffolded `identifiers:` block ready for the Zenodo concept DOI.
+- `CONTRIBUTING.md`.
+- Docusaurus build job in CI.
+
+### Changed
+
+- **Panic surface eliminated (WP17).** Parsers no longer call
+  `unwrap()` in production code: a new `bytes` helper module
+  (`read_u16/u32/f32_le`) returns `Error::Parse` with byte offset.
+  Library crate carries `#![cfg_attr(not(test), warn(clippy::
+  unwrap_used, clippy::expect_used))]`.
+- Manifest hygiene (WP13): `homepage` set to <https://sigilweaver.app>
+  and `documentation` link added.
+- README badge block unified across the Sigilweaver portfolio.
+
 ## [1.0.5] - 2026-05-21
 
 ### Changed
