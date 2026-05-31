@@ -1,6 +1,10 @@
+#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod mzml;
 pub mod raw;
 pub mod reader;
+
+pub(crate) mod bytes;
 
 pub use reader::{DecodedScan, DecodedSpectrum, Encoding, FunctionEntry, Reader};
 

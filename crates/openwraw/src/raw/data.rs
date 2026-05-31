@@ -3,6 +3,7 @@
 // paired .IDX file. Multiple compression schemes are known to exist
 // across instrument generations; scheme detection is done per-spectrum.
 
+use crate::bytes::read_u16_le;
 use crate::raw::header::FunctionCal;
 
 /// Parameters required by all three DAT decoders.
@@ -71,7 +72,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
             scan_bytes[2], ENC_A_SENTINEL
         )));
     }
-    let sentinel_tof_bin = u16::from_le_bytes(scan_bytes[4..6].try_into().unwrap()) as f64;
+    let sentinel_tof_bin = read_u16_le(scan_bytes, 4)? as f64;
     if sentinel_tof_bin == 0.0 {
         return Err(crate::Error::Parse(
             "Encoding A: sentinel_tof_bin is zero".to_owned(),
@@ -92,7 +93,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         let rec = &scan_bytes[i * 6..(i + 1) * 6];
         let block_type = rec[2];
         let raw_intensity = rec[3];
-        let tof_bin = u16::from_le_bytes(rec[4..6].try_into().unwrap()) as f64;
+        let tof_bin = read_u16_le(rec, 4)? as f64;
 
         if block_type == ENC_A_SENTINEL || raw_intensity == 0 {
             continue;
@@ -133,9 +134,9 @@ pub fn decode_encoding_b(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         return Ok(ImsSpectrum::default());
     }
 
-    let tof_bin_low = u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
+    let tof_bin_low = read_u16_le(scan_bytes, 6)? as f64;
     let last = &scan_bytes[(n - 1) * 8..n * 8];
-    let tof_bin_high = u16::from_le_bytes(last[6..8].try_into().unwrap()) as f64;
+    let tof_bin_high = read_u16_le(last, 6)? as f64;
 
     if tof_bin_high <= tof_bin_low {
         // Empty or degenerate scan; return empty without error.
@@ -154,9 +155,9 @@ pub fn decode_encoding_b(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
 
     for i in 0..n {
         let rec = &scan_bytes[i * 8..(i + 1) * 8];
-        let count = u16::from_le_bytes(rec[2..4].try_into().unwrap());
-        let dt_bin = u16::from_le_bytes(rec[4..6].try_into().unwrap()) as f64;
-        let tof_bin = u16::from_le_bytes(rec[6..8].try_into().unwrap()) as f64;
+        let count = read_u16_le(rec, 2)?;
+        let dt_bin = read_u16_le(rec, 4)? as f64;
+        let tof_bin = read_u16_le(rec, 6)? as f64;
 
         if count == 0 {
             continue;
@@ -199,9 +200,9 @@ pub fn decode_encoding_c(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         return Ok(Spectrum::default());
     }
 
-    let tof_bin_low = u16::from_le_bytes(scan_bytes[6..8].try_into().unwrap()) as f64;
+    let tof_bin_low = read_u16_le(scan_bytes, 6)? as f64;
     let last = &scan_bytes[(n - 1) * 8..n * 8];
-    let tof_bin_high = u16::from_le_bytes(last[6..8].try_into().unwrap()) as f64;
+    let tof_bin_high = read_u16_le(last, 6)? as f64;
 
     if tof_bin_high <= tof_bin_low {
         return Ok(Spectrum::default());
@@ -219,9 +220,9 @@ pub fn decode_encoding_c(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     for i in 0..n {
         let rec = &scan_bytes[i * 8..(i + 1) * 8];
         // bytes[0:2] always 0x0000 for Encoding C (no drift axis)
-        let intensity = u16::from_le_bytes(rec[2..4].try_into().unwrap());
-        let sub_bin = u16::from_le_bytes(rec[4..6].try_into().unwrap()) as f64;
-        let tof_bin = u16::from_le_bytes(rec[6..8].try_into().unwrap()) as f64;
+        let intensity = read_u16_le(rec, 2)?;
+        let sub_bin = read_u16_le(rec, 4)? as f64;
+        let tof_bin = read_u16_le(rec, 6)? as f64;
 
         if intensity == 0 {
             continue;

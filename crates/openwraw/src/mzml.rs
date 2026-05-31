@@ -252,7 +252,12 @@ impl WatersSource {
         if self.spectra.is_none() {
             self.spectra = Some(collect_records(&self.reader)?);
         }
-        Ok(self.spectra.as_ref().unwrap())
+        // Invariant: populated immediately above if it was None.
+        #[allow(clippy::expect_used)]
+        Ok(self
+            .spectra
+            .as_ref()
+            .expect("spectra populated immediately above"))
     }
 }
 

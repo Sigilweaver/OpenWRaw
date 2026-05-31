@@ -53,14 +53,14 @@ impl ChromsInf {
             )));
         }
 
-        let rec_size = u16::from_le_bytes(bytes[4..6].try_into().unwrap()) as usize;
+        let rec_size = crate::bytes::read_u16_le(bytes, 4)? as usize;
         if rec_size != RECORD_SIZE {
             return Err(crate::Error::Parse(format!(
                 "_CHROMS.INF: record size field is {rec_size}, expected {RECORD_SIZE}"
             )));
         }
 
-        let n_meta = u16::from_le_bytes(bytes[6..8].try_into().unwrap()) as usize;
+        let n_meta = crate::bytes::read_u16_le(bytes, 6)? as usize;
         let data_start = HEADER_SIZE + n_meta * RECORD_SIZE;
         if bytes.len() < data_start {
             return Err(crate::Error::Parse(format!(
@@ -82,7 +82,7 @@ impl ChromsInf {
             let off = data_start + i * RECORD_SIZE;
             let rec = &bytes[off..off + RECORD_SIZE];
 
-            let source_type = u32::from_le_bytes(rec[0..4].try_into().unwrap());
+            let source_type = crate::bytes::read_u32_le(rec, 0)?;
 
             // Bytes 4..85: null-padded channel name followed by null-padded $CC$ string.
             let payload = &rec[4..RECORD_SIZE];
@@ -156,8 +156,8 @@ pub fn parse_chro_bytes(bytes: &[u8]) -> crate::Result<Vec<ChromPoint>> {
     let n = data.len() / 8;
     let mut points = Vec::with_capacity(n);
     for i in 0..n {
-        let rt_min = f32::from_le_bytes(data[i * 8..i * 8 + 4].try_into().unwrap());
-        let value = f32::from_le_bytes(data[i * 8 + 4..i * 8 + 8].try_into().unwrap());
+        let rt_min = crate::bytes::read_f32_le(data, i * 8)?;
+        let value = crate::bytes::read_f32_le(data, i * 8 + 4)?;
         points.push(ChromPoint { rt_min, value });
     }
     Ok(points)

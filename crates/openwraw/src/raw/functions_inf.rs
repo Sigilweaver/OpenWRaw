@@ -82,12 +82,12 @@ impl FunctionTable {
 
             let function_type = rec[0x000];
             let scan_subtype = rec[0x001];
-            let cycle_time_s = f32::from_le_bytes(rec[0x002..0x006].try_into().unwrap());
-            let interscan_delay_s = f32::from_le_bytes(rec[0x01C..0x020].try_into().unwrap());
-            let scan_time_s = f32::from_le_bytes(rec[0x020..0x024].try_into().unwrap());
-            let tof_depth = u16::from_le_bytes(rec[0x010..0x012].try_into().unwrap());
-            let mz_low = f32::from_le_bytes(rec[0x0A0..0x0A4].try_into().unwrap());
-            let mz_high = f32::from_le_bytes(rec[0x120..0x124].try_into().unwrap());
+            let cycle_time_s = crate::bytes::read_f32_le(rec, 0x002)?;
+            let interscan_delay_s = crate::bytes::read_f32_le(rec, 0x01C)?;
+            let scan_time_s = crate::bytes::read_f32_le(rec, 0x020)?;
+            let tof_depth = crate::bytes::read_u16_le(rec, 0x010)?;
+            let mz_low = crate::bytes::read_f32_le(rec, 0x0A0)?;
+            let mz_high = crate::bytes::read_f32_le(rec, 0x120)?;
 
             functions.push(FunctionInfo {
                 index: (i + 1) as u32,

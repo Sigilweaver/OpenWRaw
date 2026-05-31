@@ -106,11 +106,11 @@ fn parse_variant_a(data: &[u8]) -> crate::Result<Vec<ScanIndexA>> {
         let off = i * STRIDE_A;
         let rec = &data[off..off + STRIDE_A];
 
-        let dat_offset = u32::from_le_bytes(rec[0x00..0x04].try_into().unwrap());
-        let packed = u32::from_le_bytes(rec[0x04..0x08].try_into().unwrap());
+        let dat_offset = crate::bytes::read_u32_le(rec, 0x00)?;
+        let packed = crate::bytes::read_u32_le(rec, 0x04)?;
         let n_records = (packed & 0xFFFF) as u16;
-        let retention_time_min = f32::from_le_bytes(rec[0x0C..0x10].try_into().unwrap());
-        let peak_count = u16::from_le_bytes(rec[0x10..0x12].try_into().unwrap());
+        let retention_time_min = crate::bytes::read_f32_le(rec, 0x0C)?;
+        let peak_count = crate::bytes::read_u16_le(rec, 0x10)?;
 
         records.push(ScanIndexA {
             dat_offset,
@@ -131,8 +131,8 @@ fn parse_variant_b(data: &[u8]) -> crate::Result<Vec<ScanIndexB>> {
         let off = i * STRIDE_B;
         let rec = &data[off..off + STRIDE_B];
 
-        let retention_time_min = f32::from_le_bytes(rec[0x0C..0x10].try_into().unwrap());
-        let dat_offset = u32::from_le_bytes(rec[0x16..0x1A].try_into().unwrap());
+        let retention_time_min = crate::bytes::read_f32_le(rec, 0x0C)?;
+        let dat_offset = crate::bytes::read_u32_le(rec, 0x16)?;
 
         records.push(ScanIndexB {
             dat_offset,
