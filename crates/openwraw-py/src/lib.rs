@@ -27,6 +27,70 @@ fn io_to_py(e: std::io::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
 }
 
+// ── RunHeader ─────────────────────────────────────────────────────────────────
+
+/// Acquisition metadata from `_HEADER.TXT`.
+///
+/// Returned by `RawReader.header`.
+#[pyclass(from_py_object)]
+#[derive(Clone)]
+pub struct RunHeader {
+    inner: Header,
+}
+
+#[pymethods]
+impl RunHeader {
+    /// MassLynx file format version string (e.g. `"01.00"`).
+    #[getter]
+    fn version(&self) -> Option<&str> {
+        self.inner.version.as_deref()
+    }
+
+    /// Sample or acquisition file name recorded at collection time.
+    #[getter]
+    fn acquired_name(&self) -> Option<&str> {
+        self.inner.acquired_name.as_deref()
+    }
+
+    /// Acquisition date string (e.g. `"14-Jan-2021"`).
+    #[getter]
+    fn acquired_date(&self) -> Option<&str> {
+        self.inner.acquired_date.as_deref()
+    }
+
+    /// Acquisition time string (e.g. `"16:20:52"`).
+    #[getter]
+    fn acquired_time(&self) -> Option<&str> {
+        self.inner.acquired_time.as_deref()
+    }
+
+    /// Instrument identifier string (e.g. `"QTOF"`, `"XEVO-G2XSQTOF#NotSet"`).
+    #[getter]
+    fn instrument(&self) -> Option<&str> {
+        self.inner.instrument.as_deref()
+    }
+
+    /// Operator / user name recorded at collection time.
+    #[getter]
+    fn operator(&self) -> Option<&str> {
+        self.inner.operator.as_deref()
+    }
+
+    /// Free-text sample description field.
+    #[getter]
+    fn sample_description(&self) -> Option<&str> {
+        self.inner.sample_description.as_deref()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RunHeader(instrument={:?}, acquired_date={:?})",
+            self.inner.instrument.as_deref().unwrap_or(""),
+            self.inner.acquired_date.as_deref().unwrap_or(""),
+        )
+    }
+}
+
 // ── FunctionInfo ──────────────────────────────────────────────────────────────
 
 /// Metadata for a single acquisition function from `_FUNCTNS.INF`.
@@ -278,6 +342,14 @@ impl RawReader {
         })
     }
 
+    /// Acquisition metadata parsed from `_HEADER.TXT`.
+    #[getter]
+    fn header(&self) -> RunHeader {
+        RunHeader {
+            inner: self.header.clone(),
+        }
+    }
+
     /// List of all acquisition functions in this .raw file.
     #[getter]
     fn functions(&self) -> Vec<FunctionInfo> {
@@ -516,6 +588,7 @@ impl RawReader {
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RawReader>()?;
+    m.add_class::<RunHeader>()?;
     m.add_class::<FunctionInfo>()?;
     m.add_class::<Spectrum>()?;
     m.add_class::<ImsSpectrum>()?;
