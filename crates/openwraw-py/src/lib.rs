@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use ::openwraw::raw::{
     chroms::{read_chro_dat, ChromsInf},
     data::{decode_encoding_a, decode_encoding_b, decode_encoding_c, DecodeParams},
-    extern_inf::ExternInf,
+    extern_inf::{ExternInf, Polarity},
     functions_inf::FunctionTable,
     header::Header,
     index::ScanIndex,
@@ -348,6 +348,17 @@ impl RawReader {
         RunHeader {
             inner: self.header.clone(),
         }
+    }
+
+    /// Electrospray polarity parsed from `_extern.inf`.
+    ///
+    /// Returns `"positive"`, `"negative"`, or `None` when the field is absent.
+    #[getter]
+    fn polarity(&self) -> Option<&'static str> {
+        self.ext.polarity.map(|p| match p {
+            Polarity::Positive => "positive",
+            Polarity::Negative => "negative",
+        })
     }
 
     /// List of all acquisition functions in this .raw file.
