@@ -417,9 +417,7 @@ impl RawReader {
     /// SYNAPT IMS functions (Encoding B). Determines which read method to use:
     /// `"a"` -> `read_spectrum`, `"b"` -> `read_ims_spectrum`.
     fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
-        let idx_path = self
-            .raw_dir
-            .join(format!("_FUNC{func_index:03}.IDX"));
+        let idx_path = self.raw_dir.join(format!("_FUNC{func_index:03}.IDX"));
         if !idx_path.exists() {
             return Err(PyRuntimeError::new_err(format!(
                 "IDX file not found: {}",
