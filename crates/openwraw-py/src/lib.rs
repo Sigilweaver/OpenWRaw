@@ -411,6 +411,29 @@ impl RawReader {
         Ok(idx.len())
     }
 
+    /// Encoding variant for a function (1-based `func_index`).
+    ///
+    /// Returns `"a"` for standard Q-TOF functions (Encoding A) or `"b"` for
+    /// SYNAPT IMS functions (Encoding B). Determines which read method to use:
+    /// `"a"` -> `read_spectrum`, `"b"` -> `read_ims_spectrum`.
+    fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
+        let idx_path = self
+            .raw_dir
+            .join(format!("_FUNC{func_index:03}.IDX"));
+        if !idx_path.exists() {
+            return Err(PyRuntimeError::new_err(format!(
+                "IDX file not found: {}",
+                idx_path.display()
+            )));
+        }
+        let idx_bytes = std::fs::read(&idx_path).map_err(io_to_py)?;
+        let idx = ScanIndex::from_bytes(&idx_bytes).map_err(to_py_err)?;
+        Ok(match idx {
+            ScanIndex::A(_) => "a",
+            ScanIndex::B(_) => "b",
+        })
+    }
+
     /// Retention time (minutes) for a scan.
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
