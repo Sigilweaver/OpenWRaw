@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use ::openwraw::raw::{
     chroms::{read_chro_dat, ChromsInf},
     data::{decode_encoding_a, decode_encoding_b, decode_encoding_c, DecodeParams},
-    extern_inf::ExternInf,
+    extern_inf::{ExternInf, Polarity},
     functions_inf::FunctionTable,
     header::Header,
     index::ScanIndex,
@@ -25,6 +25,70 @@ fn to_py_err(e: ::openwraw::Error) -> PyErr {
 
 fn io_to_py(e: std::io::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
+}
+
+// ── RunHeader ─────────────────────────────────────────────────────────────────
+
+/// Acquisition metadata from `_HEADER.TXT`.
+///
+/// Returned by `RawReader.header`.
+#[pyclass(from_py_object)]
+#[derive(Clone)]
+pub struct RunHeader {
+    inner: Header,
+}
+
+#[pymethods]
+impl RunHeader {
+    /// MassLynx file format version string (e.g. `"01.00"`).
+    #[getter]
+    fn version(&self) -> Option<&str> {
+        self.inner.version.as_deref()
+    }
+
+    /// Sample or acquisition file name recorded at collection time.
+    #[getter]
+    fn acquired_name(&self) -> Option<&str> {
+        self.inner.acquired_name.as_deref()
+    }
+
+    /// Acquisition date string (e.g. `"14-Jan-2021"`).
+    #[getter]
+    fn acquired_date(&self) -> Option<&str> {
+        self.inner.acquired_date.as_deref()
+    }
+
+    /// Acquisition time string (e.g. `"16:20:52"`).
+    #[getter]
+    fn acquired_time(&self) -> Option<&str> {
+        self.inner.acquired_time.as_deref()
+    }
+
+    /// Instrument identifier string (e.g. `"QTOF"`, `"XEVO-G2XSQTOF#NotSet"`).
+    #[getter]
+    fn instrument(&self) -> Option<&str> {
+        self.inner.instrument.as_deref()
+    }
+
+    /// Operator / user name recorded at collection time.
+    #[getter]
+    fn operator(&self) -> Option<&str> {
+        self.inner.operator.as_deref()
+    }
+
+    /// Free-text sample description field.
+    #[getter]
+    fn sample_description(&self) -> Option<&str> {
+        self.inner.sample_description.as_deref()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RunHeader(instrument={:?}, acquired_date={:?})",
+            self.inner.instrument.as_deref().unwrap_or(""),
+            self.inner.acquired_date.as_deref().unwrap_or(""),
+        )
+    }
 }
 
 // ── FunctionInfo ──────────────────────────────────────────────────────────────
@@ -278,6 +342,25 @@ impl RawReader {
         })
     }
 
+    /// Acquisition metadata parsed from `_HEADER.TXT`.
+    #[getter]
+    fn header(&self) -> RunHeader {
+        RunHeader {
+            inner: self.header.clone(),
+        }
+    }
+
+    /// Electrospray polarity parsed from `_extern.inf`.
+    ///
+    /// Returns `"positive"`, `"negative"`, or `None` when the field is absent.
+    #[getter]
+    fn polarity(&self) -> Option<&'static str> {
+        self.ext.polarity.map(|p| match p {
+            Polarity::Positive => "positive",
+            Polarity::Negative => "negative",
+        })
+    }
+
     /// List of all acquisition functions in this .raw file.
     #[getter]
     fn functions(&self) -> Vec<FunctionInfo> {
@@ -309,10 +392,46 @@ impl RawReader {
         }
     }
 
+    /// MS level for a function (1-based `func_index`).
+    ///
+    /// Returns `1` for MS1 survey and reference functions, `2` for MSe/DDA/MS2
+    /// functions. Falls back to `1` when the function is not described in
+    /// `_extern.inf`.
+    fn ms_level(&self, func_index: u32) -> u32 {
+        self.ext
+            .functions
+            .get(&func_index)
+            .map(|f| f.mode.ms_level())
+            .unwrap_or(1)
+    }
+
     /// Number of scans in a function (1-based `func_index`).
     fn n_scans(&self, func_index: u32) -> PyResult<usize> {
         let (idx, _dat) = self.load_idx_dat(func_index)?;
         Ok(idx.len())
+    }
+
+    /// Encoding variant for a function (1-based `func_index`).
+    ///
+    /// Returns `"a"` for standard Q-TOF functions (Encoding A) or `"b"` for
+    /// SYNAPT IMS functions (Encoding B). Determines which read method to use:
+    /// `"a"` -> `read_spectrum`, `"b"` -> `read_ims_spectrum`.
+    fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
+        let idx_path = self
+            .raw_dir
+            .join(format!("_FUNC{func_index:03}.IDX"));
+        if !idx_path.exists() {
+            return Err(PyRuntimeError::new_err(format!(
+                "IDX file not found: {}",
+                idx_path.display()
+            )));
+        }
+        let idx_bytes = std::fs::read(&idx_path).map_err(io_to_py)?;
+        let idx = ScanIndex::from_bytes(&idx_bytes).map_err(to_py_err)?;
+        Ok(match idx {
+            ScanIndex::A(_) => "a",
+            ScanIndex::B(_) => "b",
+        })
     }
 
     /// Retention time (minutes) for a scan.
@@ -516,6 +635,7 @@ impl RawReader {
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RawReader>()?;
+    m.add_class::<RunHeader>()?;
     m.add_class::<FunctionInfo>()?;
     m.add_class::<Spectrum>()?;
     m.add_class::<ImsSpectrum>()?;

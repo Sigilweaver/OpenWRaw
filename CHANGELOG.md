@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-02
+
+### Added
+
+- `RunHeader` class (Python): exposes `_HEADER.TXT` metadata -
+  `instrument`, `acquired_date`, `acquired_time`, `operator`,
+  `sample_description`, `version`, `acquired_name`. Returned by
+  `RawReader.header`.
+- `RawReader.polarity` (Python): electrospray polarity from
+  `_extern.inf` as `"positive"`, `"negative"`, or `None`.
+- `RawReader.ms_level(func_index)` (Python): returns `1` for MS1
+  survey and reference functions, `2` for MSe / DDA / targeted MS2
+  functions. Falls back to `1` for functions absent from `_extern.inf`.
+- `RawReader.function_encoding(func_index)` (Python): returns `"a"`
+  for standard Q-TOF (non-IMS) functions or `"b"` for SYNAPT IMS
+  functions, indicating which read method to use.
+
+### Changed
+
+- `publish.yml`: crates.io publish step uses `continue-on-error: true`
+  so re-triggered tag runs do not fail the workflow when the crate
+  version was already published.
+
 ## [1.1.0] - 2026-05-31
 
 ### Added
