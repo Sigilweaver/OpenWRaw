@@ -392,6 +392,19 @@ impl RawReader {
         }
     }
 
+    /// MS level for a function (1-based `func_index`).
+    ///
+    /// Returns `1` for MS1 survey and reference functions, `2` for MSe/DDA/MS2
+    /// functions. Falls back to `1` when the function is not described in
+    /// `_extern.inf`.
+    fn ms_level(&self, func_index: u32) -> u32 {
+        self.ext
+            .functions
+            .get(&func_index)
+            .map(|f| f.mode.ms_level())
+            .unwrap_or(1)
+    }
+
     /// Number of scans in a function (1-based `func_index`).
     fn n_scans(&self, func_index: u32) -> PyResult<usize> {
         let (idx, _dat) = self.load_idx_dat(func_index)?;
