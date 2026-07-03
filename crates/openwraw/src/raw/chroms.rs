@@ -163,7 +163,7 @@ pub fn parse_chro_bytes(bytes: &[u8]) -> crate::Result<Vec<ChromPoint>> {
     Ok(points)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers --
 
 /// Decode bytes as Windows-1252 (the encoding Waters uses for channel names).
 ///
@@ -214,7 +214,7 @@ fn parse_cc_spec(bytes: &[u8]) -> Option<(f64, String)> {
 mod tests {
     use super::*;
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // -- Helpers --
 
     fn make_header(n_meta: u16, n_data: usize) -> Vec<u8> {
         let mut h = vec![0u8; HEADER_SIZE];
@@ -260,7 +260,7 @@ mod tests {
         bytes
     }
 
-    // ── _CHROMS.INF tests ─────────────────────────────────────────────────────
+    // -- _CHROMS.INF tests --
 
     #[test]
     fn parse_empty_channels() {
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(ci.channels[0].units, "\u{00B5}L/min"); // µL/min
     }
 
-    // ── _CHROnnnn.DAT tests ───────────────────────────────────────────────────
+    // -- _CHROnnnn.DAT tests --
 
     fn make_chro_dat(points: &[(f32, f32)]) -> Vec<u8> {
         let mut bytes = vec![0u8; CHRO_DATA_OFFSET];
@@ -395,7 +395,7 @@ mod tests {
         assert!(parse_chro_bytes(&bytes).is_err());
     }
 
-    // ── Corpus integration tests ──────────────────────────────────────────────
+    // -- Corpus integration tests --
 
     #[test]
     fn corpus_ctpa_chroms_inf() {

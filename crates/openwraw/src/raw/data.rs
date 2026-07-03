@@ -40,7 +40,7 @@ pub struct ImsSpectrum {
     pub intensity: Vec<f32>,
 }
 
-// ── Encoding A ────────────────────────────────────────────────────────────────
+// -- Encoding A --
 
 /// Byte marker for an Encoding A sentinel record.
 const ENC_A_SENTINEL: u8 = 0x70;
@@ -108,7 +108,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
-// ── Encoding B ────────────────────────────────────────────────────────────────
+// -- Encoding B --
 
 /// Decode one scan slice from an Encoding B `_FUNCnnn.DAT` file (IMS mode).
 ///
@@ -174,7 +174,7 @@ pub fn decode_encoding_b(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
-// ── Encoding C ────────────────────────────────────────────────────────────────
+// -- Encoding C --
 
 /// Decode one scan slice from an Encoding C `_FUNCnnn.DAT` file (non-IMS QTof).
 ///
@@ -265,7 +265,7 @@ mod tests {
         }
     }
 
-    // ── Encoding A helpers ──────────────────────────────────────────────────
+    // -- Encoding A helpers --
 
     fn enc_a_sentinel(sentinel_tof_bin: u16) -> [u8; 6] {
         let mut r = [0u8; 6];
@@ -282,7 +282,7 @@ mod tests {
         r
     }
 
-    // ── Encoding B/C helpers ────────────────────────────────────────────────
+    // -- Encoding B/C helpers --
 
     fn enc_b_record(count: u16, dt_bin: u16, tof_bin: u16) -> [u8; 8] {
         let mut r = [0u8; 8];
@@ -304,7 +304,7 @@ mod tests {
         recs.iter().flat_map(|r| r.iter().copied()).collect()
     }
 
-    // ── Encoding A tests ────────────────────────────────────────────────────
+    // -- Encoding A tests --
 
     // With a_us=1.0, mz_high=100.0, sentinel_tof_bin=10000:
     //   t_bin_us = 1.0 * 10.0 / 10000 = 0.001 µs/bin
@@ -370,7 +370,7 @@ mod tests {
         }
     }
 
-    // ── Encoding B tests ────────────────────────────────────────────────────
+    // -- Encoding B tests --
 
     // With a_us=1.0, mz_low=4.0, mz_high=100.0:
     //   t_low=2.0, t_high=10.0, tof_bin_low=2000, tof_bin_high=10000
@@ -427,7 +427,7 @@ mod tests {
         assert!(decode_encoding_b(&data, &test_params()).is_err());
     }
 
-    // ── Encoding C tests ────────────────────────────────────────────────────
+    // -- Encoding C tests --
 
     // Same calibration as Encoding B.
     // sub_bin=0 → frac_bin = tof_bin - tof_bin_low, same formula as B.
@@ -490,7 +490,7 @@ mod tests {
         assert!(decode_encoding_c(&data, &test_params()).is_err());
     }
 
-    // ── Corpus integration tests ────────────────────────────────────────────
+    // -- Corpus integration tests --
     // These tests read from the local corpus and are skipped when it is absent.
 
     #[test]

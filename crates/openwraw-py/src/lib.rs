@@ -17,7 +17,7 @@ use ::openwraw::raw::{
     index::ScanIndex,
 };
 
-// ── Error conversion ──────────────────────────────────────────────────────────
+// -- Error conversion --
 
 fn to_py_err(e: ::openwraw::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
@@ -27,7 +27,7 @@ fn io_to_py(e: std::io::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
 }
 
-// ── RunHeader ─────────────────────────────────────────────────────────────────
+// -- RunHeader --
 
 /// Acquisition metadata from `_HEADER.TXT`.
 ///
@@ -91,7 +91,7 @@ impl RunHeader {
     }
 }
 
-// ── FunctionInfo ──────────────────────────────────────────────────────────────
+// -- FunctionInfo --
 
 /// Metadata for a single acquisition function from `_FUNCTNS.INF`.
 #[pyclass(from_py_object)]
@@ -174,7 +174,7 @@ impl FunctionInfo {
     }
 }
 
-// ── Spectrum ──────────────────────────────────────────────────────────────────
+// -- Spectrum --
 
 /// A decoded 1-D mass spectrum (m/z vs intensity).
 ///
@@ -200,7 +200,7 @@ impl Spectrum {
     }
 }
 
-// ── ImsSpectrum ───────────────────────────────────────────────────────────────
+// -- ImsSpectrum --
 
 /// A decoded IMS spectrum: m/z, drift time, and intensity per ion.
 ///
@@ -229,7 +229,7 @@ impl ImsSpectrum {
     }
 }
 
-// ── ChromChannel ──────────────────────────────────────────────────────────────
+// -- ChromChannel --
 
 /// Description of a single recorded chromatographic channel from `_CHROMS.INF`.
 #[pyclass(from_py_object)]
@@ -262,7 +262,7 @@ impl ChromChannel {
     }
 }
 
-// ── ChromPoint ────────────────────────────────────────────────────────────────
+// -- ChromPoint --
 
 /// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
 #[pyclass(from_py_object)]
@@ -286,7 +286,7 @@ impl ChromPoint {
     }
 }
 
-// ── RawReader ─────────────────────────────────────────────────────────────────
+// -- RawReader --
 
 /// Open a Waters MassLynx `.raw` directory and read its contents.
 ///
@@ -628,7 +628,7 @@ impl RawReader {
     }
 }
 
-// ── Module ────────────────────────────────────────────────────────────────────
+// -- Module --
 
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
