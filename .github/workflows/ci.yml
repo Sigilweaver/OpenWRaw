@@ -9,6 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Small public Waters MassLynx .raw bundle (~5 MB zipped) from PRIDE
+  # PXD058812, used for the mzML schema-validation job. Waters .raw is a
+  # directory bundle, distributed on PRIDE as a .raw.zip.
+  WATERS_ZIP_URL: >-
+    https://ftp.pride.ebi.ac.uk/pride/data/archive/2025/05/PXD058812/ITEM_M11_7_His_tag_01.raw.zip
+  WATERS_BUNDLE: ITEM_M11_7_His_tag_01.raw
 
 jobs:
   rust:
@@ -72,6 +78,42 @@ jobs:
 
       - name: Smoke import
         run: .venv/bin/python -c "import openwraw; print(openwraw.__name__)"
+
+  validate-mzml:
+    name: mzML XSD validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build to_mzml example (release)
+        run: cargo build --release --example to_mzml
+
+      - name: Ensure xmllint is available
+        run: command -v xmllint || (sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils)
+
+      - name: Download and unzip Waters sample
+        run: |
+          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          echo "Downloaded $(du -sh waters.raw.zip | cut -f1) zip"
+          unzip -q waters.raw.zip
+          test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
+
+      - name: Convert Waters .raw to mzML (plain + indexed)
+        run: |
+          ./target/release/examples/to_mzml "$WATERS_BUNDLE" waters.mzML
+          ./target/release/examples/to_mzml "$WATERS_BUNDLE" waters_indexed.mzML --indexed
+          echo "plain: $(wc -l < waters.mzML) lines, indexed: $(wc -l < waters_indexed.mzML) lines"
+
+      - name: Validate against PSI-MS XSD
+        run: |
+          xmllint --noout --schema schema/mzML1.1.0.xsd waters.mzML
+          xmllint --noout --schema schema/mzML1.1.2_idx.xsd waters_indexed.mzML
 
   docs:
     name: Docs (Docusaurus)
