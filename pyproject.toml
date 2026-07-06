@@ -5,6 +5,7 @@ build-backend = "maturin"
 [project]
 name = "openwraw"
 description = "Python bindings for the OpenWRaw Waters MassLynx RAW file parser"
+keywords = ["mass-spectrometry", "waters", "masslynx", "raw", "proteomics"]
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
