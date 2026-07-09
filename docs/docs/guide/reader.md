@@ -10,10 +10,10 @@ indexes every MS function and chromatogram. Spectrum data is read on
 demand from the corresponding `_FUNCnnn.DAT` files.
 
 ```rust
-use openwraw::RawReader;
+use openwraw::Reader;
 
-let r = RawReader::open("sample.raw")?;
-println!("{} functions, {} channels", r.functions().len(), r.channels().len());
+let r = Reader::open("sample.raw")?;
+println!("{} functions", r.functions.len());
 ```
 
 Public types live under `openwraw::raw`:
@@ -27,8 +27,14 @@ Public types live under `openwraw::raw`:
 | `data`          | `_FUNCnnn.DAT` - spectrum decoders            |
 | `chroms`        | `_CHROMS.INF` + `_CHROnnnn.DAT`                |
 
-The high-level `RawReader` glues these together; for byte-level access
-the parsers are also usable individually.
+The high-level `Reader` glues functions and their spectrum data together;
+chromatogram channels are a separate concern accessed directly through the
+`chroms` module (see [Chromatograms](./chromatograms)). For byte-level
+access the parsers under `openwraw::raw` are also usable individually.
+
+Note: the Python bindings expose this same reader as `openwraw.RawReader`
+(see [Quickstart](../quickstart)) - the "Raw" prefix is a Python-side
+naming choice, not the Rust type name.
 
 ## Error handling
 

@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
 // PyO3 bindings for the openwraw library.
 //
 // Exposes a high-level `RawReader` class that opens a Waters .raw directory

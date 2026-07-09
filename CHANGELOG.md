@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `pyo3` bumped from 0.28.3 to 0.29.0, clearing two RustSec advisories
+  (RUSTSEC-2026-0177, RUSTSEC-2026-0176).
+- `openwraw-py` no longer opts out of the workspace's `unsafe_code =
+  "forbid"` lint; it never contained an `unsafe` block, so this was a stale
+  exception out of sync with CONTRIBUTING.md's description of the policy.
+  Also wires up the `clippy::unwrap_used`/`expect_used` warn lint the core
+  crate already carries.
+- CI (`ci.yml`) now runs `cargo clippy`/`cargo test` against the full
+  workspace (previously `--exclude openwraw-py` on both) and adds
+  `windows-latest` to the `rust` job's matrix.
+- New `audit.yml` workflow runs `cargo audit` against the RustSec Advisory
+  DB on dependency changes and weekly.
+
+### Fixed
+
+- `docs/guide/reader.md` and `docs/guide/chromatograms.md`: the Rust
+  examples referenced a `RawReader` type and `.channels()`/`.read_chrom()`
+  methods that don't exist on the Rust API (that name belongs only to the
+  Python bindings; the Rust type is `Reader`, and chromatogram channels are
+  read via free functions in the `chroms` module, not through `Reader`).
+  Both examples now compile.
+
 ## [1.2.1] - 2026-07-06
 
 ### Changed
