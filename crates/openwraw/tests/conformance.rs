@@ -13,9 +13,9 @@ use openwraw::{mzml::collect_records, Reader};
 fn fixture() -> Option<PathBuf> {
     let candidates = [
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../ProLance/corpus/waters/PXD058812/molecular_mass_P15_01.raw"),
+            .join("../../../SpecLance/corpus/waters/PXD058812/molecular_mass_P15_01.raw"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../ProLance/corpus/waters/PXD058812/MS_fragmentation_P29_01.raw"),
+            .join("../../../SpecLance/corpus/waters/PXD058812/MS_fragmentation_P29_01.raw"),
     ];
     candidates
         .into_iter()
