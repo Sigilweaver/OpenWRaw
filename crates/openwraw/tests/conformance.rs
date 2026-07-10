@@ -1,13 +1,13 @@
 //! Conformance harness: every spectrum produced by the openwraw
 //! `collect_records` pipeline must satisfy the invariants in
-//! `openproteo-core`.
+//! `openmassspec-core`.
 //!
 //! Looks for a small Waters bundle from PXD058812; skips silently when
 //! absent so CI without the corpus is happy.
 
 use std::path::PathBuf;
 
-use openproteo_core::conformance::assert_iter_invariants;
+use openmassspec_core::conformance::assert_iter_invariants;
 use openwraw::{mzml::collect_records, Reader};
 
 fn fixture() -> Option<PathBuf> {

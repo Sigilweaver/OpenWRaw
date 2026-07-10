@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-10
+
 ### Changed
 
+- Dependency renamed `openproteo-core` -> `openmassspec-core` (1.0.0),
+  following the umbrella's rename from OpenProteo to OpenMassSpec.
+  No behavioral change.
 - `pyo3` bumped from 0.28.3 to 0.29.0, clearing two RustSec advisories
   (RUSTSEC-2026-0177, RUSTSEC-2026-0176).
 - `openwraw-py` no longer opts out of the workspace's `unsafe_code =

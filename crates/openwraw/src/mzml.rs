@@ -1,5 +1,5 @@
 //! mzML export for Waters `.raw/` bundles, built on the canonical writer
-//! in `openproteo-core`.
+//! in `openmassspec-core`.
 //!
 //! Frame -> spectrum projection:
 //!
@@ -17,7 +17,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use openproteo_core as msc;
+use openmassspec_core as msc;
 
 use crate::raw::data::ImsSpectrum;
 use crate::reader::{DecodedSpectrum, Reader};
@@ -149,7 +149,7 @@ fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
     }
 }
 
-/// Collect every decoded scan in a bundle into `openproteo_core` records.
+/// Collect every decoded scan in a bundle into `openmassspec_core` records.
 pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
     let mut out: Vec<msc::SpectrumRecord> = Vec::with_capacity(reader.total_scan_count());
     let mut scan_counter: u32 = 0;

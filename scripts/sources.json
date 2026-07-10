@@ -1,5 +1,5 @@
 [
     {
-        "_comment": "Waters MassLynx .raw/ acquisition bundles ship as directories, not single files. The current shared OpenProteo fetcher only downloads single files; add entries here once directory-bundle support lands (see OpenProteo/docs/CORPUS.md). Schema reminder: vendor='waters', instrument, accession, files[] or count, optional format_version / acquisition_mode / expected_spectrum_count / notes."
+        "_comment": "Waters MassLynx .raw/ acquisition bundles ship as directories, not single files. The current shared OpenMassSpec fetcher only downloads single files; add entries here once directory-bundle support lands (see OpenMassSpec/docs/CORPUS.md). Schema reminder: vendor='waters', instrument, accession, files[] or count, optional format_version / acquisition_mode / expected_spectrum_count / notes."
     }
 ]
