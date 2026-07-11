@@ -21,6 +21,22 @@ Full documentation: [sigilweaver.app/openwraw/docs](https://sigilweaver.app/open
 
 ## Install
 
+**Prefer [`openmassspec-io`](https://github.com/Sigilweaver/OpenMassSpec)
+with the `waters` feature/extra** unless you need this parser standalone
+(minimal dependencies, or building your own abstraction) - the umbrella
+gives you format auto-detection, mzML conversion, and Arrow streaming
+across all wired-in vendors for free:
+
+```sh
+cargo add openmassspec-io --features waters
+```
+
+```sh
+pip install openmassspec[waters]
+```
+
+Standalone:
+
 Rust:
 
 ```sh
