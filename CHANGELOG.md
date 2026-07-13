@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-07-13
+
+### Fixed
+
+- `WatersSource::iter_spectra` decoded every scan into a `Vec` up front and
+  then cloned that `Vec` again, holding two full copies of the run in
+  memory before yielding a single spectrum. It now streams scans lazily
+  through `Reader::iter_spectra()` directly, skipping scans that fail to
+  decode instead of aborting the whole run. Fixes #4.
+
 ## [1.2.2] - 2026-07-10
 
 ### Changed
