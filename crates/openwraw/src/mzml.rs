@@ -20,7 +20,7 @@ use std::path::Path;
 use openmassspec_core as msc;
 
 use crate::raw::data::ImsSpectrum;
-use crate::reader::{DecodedSpectrum, Reader};
+use crate::reader::{DecodedScan, DecodedSpectrum, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
 const SOFTWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -156,39 +156,55 @@ pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord
     for decoded in reader.iter_spectra() {
         let scan = decoded?;
         scan_counter += 1;
-        let (mz, intensity, mobility) = match &scan.spectrum {
-            DecodedSpectrum::Plain(s) => (s.mz.clone(), s.intensity.clone(), None),
-            DecodedSpectrum::Ims(ims) => {
-                let mob: Vec<f32> = ims.drift_time_ms.iter().map(|&d| d as f32).collect();
-                (ims.mz.clone(), ims.intensity.clone(), Some(mob))
-            }
-        };
-        let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
-        let ms_level = ms_level_for_function(reader, scan.function_index);
-        out.push(msc::SpectrumRecord {
-            index: (scan_counter as usize).saturating_sub(1),
-            scan_number: scan_counter,
-            native_id: native_id_for(scan.function_index, scan.scan_idx),
-            ms_level,
-            polarity: polarity_for(reader, scan.function_index),
-            scan_mode: Some(msc::ScanMode::Centroid),
-            analyzer: Some(msc::Analyzer::TOFMS),
-            filter: None,
-            retention_time_sec: scan.retention_time_min as f64 * 60.0,
-            total_ion_current: Some(tic),
-            base_peak_mz: bp_mz,
-            base_peak_intensity: bp_int,
-            low_mz,
-            high_mz,
-            ion_injection_time_ms: None,
-            inv_mobility: None,
-            precursor: None,
-            mz,
-            intensity,
-            inv_mobility_per_peak: mobility,
-        });
+        out.push(record_from_scan(reader, scan_counter, scan));
     }
     Ok(out)
+}
+
+/// Convert one already-decoded scan into an `openmassspec_core` record.
+///
+/// `scan_counter` is the 1-based position of `scan` within the reader's
+/// iteration order, not a count of successfully-decoded scans so far, so
+/// `index`/`scan_number` stay stable regardless of whether earlier scans
+/// failed to decode.
+fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> msc::SpectrumRecord {
+    let DecodedScan {
+        function_index,
+        scan_idx,
+        retention_time_min,
+        spectrum,
+    } = scan;
+    let (mz, intensity, mobility) = match spectrum {
+        DecodedSpectrum::Plain(s) => (s.mz, s.intensity, None),
+        DecodedSpectrum::Ims(ims) => {
+            let mob: Vec<f32> = ims.drift_time_ms.iter().map(|&d| d as f32).collect();
+            (ims.mz, ims.intensity, Some(mob))
+        }
+    };
+    let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
+    let ms_level = ms_level_for_function(reader, function_index);
+    msc::SpectrumRecord {
+        index: (scan_counter as usize).saturating_sub(1),
+        scan_number: scan_counter,
+        native_id: native_id_for(function_index, scan_idx),
+        ms_level,
+        polarity: polarity_for(reader, function_index),
+        scan_mode: Some(msc::ScanMode::Centroid),
+        analyzer: Some(msc::Analyzer::TOFMS),
+        filter: None,
+        retention_time_sec: retention_time_min as f64 * 60.0,
+        total_ion_current: Some(tic),
+        base_peak_mz: bp_mz,
+        base_peak_intensity: bp_int,
+        low_mz,
+        high_mz,
+        ion_injection_time_ms: None,
+        inv_mobility: None,
+        precursor: None,
+        mz,
+        intensity,
+        inv_mobility_per_peak: mobility,
+    }
 }
 
 fn summarize_arrays(
@@ -219,22 +235,19 @@ fn summarize_arrays(
     (tic, Some(bp_mz), Some(bp_int as f64), Some(lo), Some(hi))
 }
 
-/// `SpectrumSource` adapter that owns a [`Reader`]. All spectra are decoded
-/// up front (Waters bundles in the workspace corpus are <= 1GB so this is
-/// fine; for larger bundles a streaming variant would be a worthwhile
-/// follow-up).
+/// `SpectrumSource` adapter that owns a [`Reader`]. Spectra are decoded
+/// scan-by-scan as `iter_spectra` is driven; nothing is buffered beyond the
+/// scan currently being yielded. A scan that fails to decode is skipped
+/// (per [`msc::SpectrumSource::iter_spectra`]'s contract) rather than
+/// aborting the whole run.
 pub struct WatersSource {
     reader: Reader,
-    spectra: Option<Vec<msc::SpectrumRecord>>,
 }
 
 impl WatersSource {
     /// Build a source from an already-opened [`Reader`].
     pub fn new(reader: Reader) -> Self {
-        Self {
-            reader,
-            spectra: None,
-        }
+        Self { reader }
     }
 
     /// Open a `.raw/` directory and wrap it in a source.
@@ -247,18 +260,6 @@ impl WatersSource {
     pub fn reader(&self) -> &Reader {
         &self.reader
     }
-
-    fn build_spectra(&mut self) -> crate::Result<&Vec<msc::SpectrumRecord>> {
-        if self.spectra.is_none() {
-            self.spectra = Some(collect_records(&self.reader)?);
-        }
-        // Invariant: populated immediately above if it was None.
-        #[allow(clippy::expect_used)]
-        Ok(self
-            .spectra
-            .as_ref()
-            .expect("spectra populated immediately above"))
-    }
 }
 
 impl msc::SpectrumSource for WatersSource {
@@ -266,18 +267,23 @@ impl msc::SpectrumSource for WatersSource {
         run_metadata_for(&self.reader)
     }
     fn iter_spectra<'s>(&'s mut self) -> Box<dyn Iterator<Item = msc::SpectrumRecord> + 's> {
-        let recs = self.build_spectra().cloned().unwrap_or_default();
-        Box::new(recs.into_iter())
+        let reader = &self.reader;
+        let mut scan_counter: u32 = 0;
+        Box::new(reader.iter_spectra().filter_map(move |decoded| {
+            scan_counter += 1;
+            decoded
+                .ok()
+                .map(|scan| record_from_scan(reader, scan_counter, scan))
+        }))
     }
     fn spectrum_count_hint(&self) -> Option<usize> {
-        self.spectra.as_ref().map(|v| v.len())
+        Some(self.reader.total_scan_count())
     }
 }
 
 /// Convenience wrapper: open `dir`, decode every scan, emit mzML.
 pub fn write_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crate::Result<()> {
     let mut src = WatersSource::open(dir)?;
-    src.build_spectra()?;
     msc::write_mzml(&mut src, out).map_err(crate::Error::Io)?;
     Ok(())
 }
@@ -285,7 +291,6 @@ pub fn write_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crate::Resul
 /// Indexed-mzML equivalent of [`write_mzml`].
 pub fn write_indexed_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crate::Result<()> {
     let mut src = WatersSource::open(dir)?;
-    src.build_spectra()?;
     msc::write_indexed_mzml(&mut src, out).map_err(crate::Error::Io)?;
     Ok(())
 }
