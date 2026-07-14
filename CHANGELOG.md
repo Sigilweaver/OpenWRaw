@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- CI (`ci.yml`): the `python` job now also runs on `windows-latest`, so the
+  Windows wheel `publish.yml` ships is actually built and imported before a
+  release. The job's venv paths are OS-conditional (`.venv\Scripts\` on
+  Windows, `.venv/bin/` elsewhere) and steps now invoke `python -m pip` /
+  `python -m maturin` instead of calling the venv's executables directly.
+  Fixes #2. (@Nabejo)
+
 ## [1.2.3] - 2026-07-13
 
 ### Fixed
