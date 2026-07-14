@@ -93,6 +93,37 @@ jobs:
       - name: Smoke import
         run: ${{ env.VENV_PYTHON }} -c "import openwraw; print(openwraw.__name__)"
 
+  fuzz:
+    name: fuzz (build + seed corpus smoke run)
+    runs-on: ubuntu-latest
+    env:
+      # Unset the workflow-level `-D warnings`: cargo-fuzz appends the
+      # inherited RUSTFLAGS to its own sanitizer/coverage instrumentation
+      # flags rather than replacing them, so on the nightly toolchain this
+      # job builds with, a new nightly-only lint (in this crate or a
+      # dependency) would hard-fail CI even when the stable-toolchain jobs
+      # stay clean.
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "fuzz -> target"
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz target
+        run: cargo +nightly fuzz build
+
+      - name: Run against the tracked seed corpus (no mutation)
+        run: cargo +nightly fuzz run fuzz_reader fuzz/seed_corpus -- -runs=0
+
   validate-mzml:
     name: mzML XSD validation
     runs-on: ubuntu-latest
