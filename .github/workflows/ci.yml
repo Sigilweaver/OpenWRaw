@@ -54,6 +54,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
+          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -71,14 +72,26 @@ jobs:
       - name: Create virtualenv
         run: python -m venv .venv
 
+      - name: Set venv paths (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "VENV_PYTHON=.venv/bin/python" >> "$GITHUB_ENV"
+          echo "VENV_PIP=.venv/bin/pip" >> "$GITHUB_ENV"
+
+      - name: Set venv paths (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "VENV_PYTHON=.venv\Scripts\python.exe" >> $env:GITHUB_ENV
+          echo "VENV_PIP=.venv\Scripts\pip.exe" >> $env:GITHUB_ENV
+
       - name: Install maturin
-        run: .venv/bin/pip install maturin
+        run: ${{ env.VENV_PIP }} install maturin
 
       - name: Build extension
-        run: .venv/bin/maturin develop --release
+        run: ${{ env.VENV_PYTHON }} -m maturin develop --release
 
       - name: Smoke import
-        run: .venv/bin/python -c "import openwraw; print(openwraw.__name__)"
+        run: ${{ env.VENV_PYTHON }} -c "import openwraw; print(openwraw.__name__)"
 
   fuzz:
     name: fuzz (build + seed corpus smoke run)
