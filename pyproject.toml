@@ -18,6 +18,12 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 manifest-path = "crates/openwraw-py/Cargo.toml"

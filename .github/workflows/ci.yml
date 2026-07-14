@@ -71,14 +71,25 @@ jobs:
       - name: Create virtualenv
         run: python -m venv .venv
 
-      - name: Install maturin
-        run: .venv/bin/pip install maturin
+      - name: Install maturin and pytest
+        run: .venv/bin/pip install maturin pytest
 
       - name: Build extension
         run: .venv/bin/maturin develop --release
 
       - name: Smoke import
         run: .venv/bin/python -c "import openwraw; print(openwraw.__name__)"
+
+      - name: Download and unzip Waters sample
+        run: |
+          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          unzip -q waters.raw.zip
+          test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
+
+      - name: pytest
+        env:
+          OPENWRAW_TEST_BUNDLE: ${{ github.workspace }}/${{ env.WATERS_BUNDLE }}
+        run: .venv/bin/pytest tests/ -v
 
   validate-mzml:
     name: mzML XSD validation
