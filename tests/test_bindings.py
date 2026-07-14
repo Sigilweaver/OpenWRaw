@@ -52,7 +52,10 @@ def test_functions(raw_bundle):
 
 def test_channels(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
-    for ch in r.channels:
+    channels = r.channels
+    if not channels:
+        pytest.skip("bundle has no _CHROMS.INF (no channels)")
+    for ch in channels:
         assert isinstance(ch.index, int)
         assert isinstance(ch.source_type, int)
         assert isinstance(ch.name, str)
@@ -83,6 +86,7 @@ def test_read_spectrum(raw_bundle):
         spec = r.read_spectrum(f.index, 0)
         assert len(spec.mz) == len(spec.intensity)
         assert len(spec) == len(spec.mz)
+        assert len(spec) > 0
         assert "Spectrum(" in repr(spec)
 
 
@@ -96,6 +100,7 @@ def test_read_ims_spectrum(raw_bundle):
         ims = r.read_ims_spectrum(f.index, 0)
         assert len(ims.mz) == len(ims.drift_time_ms) == len(ims.intensity)
         assert len(ims) == len(ims.mz)
+        assert len(ims) > 0
         assert "ImsSpectrum(" in repr(ims)
     if not saw_ims_function:
         pytest.skip("bundle has no Encoding B (IMS) function")
@@ -103,8 +108,12 @@ def test_read_ims_spectrum(raw_bundle):
 
 def test_read_chrom(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
-    for ch in r.channels:
+    channels = r.channels
+    if not channels:
+        pytest.skip("bundle has no _CHROMS.INF (no channels)")
+    for ch in channels:
         points = r.read_chrom(ch.index)
+        assert len(points) > 0
         for p in points:
             assert isinstance(p.rt_min, float)
             assert isinstance(p.value, float)

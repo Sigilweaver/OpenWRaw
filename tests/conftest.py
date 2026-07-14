@@ -23,6 +23,20 @@ WATERS_BUNDLE = os.environ.get("WATERS_BUNDLE", "ITEM_M11_7_His_tag_01.raw")
 CACHE_DIR = Path(__file__).parent / ".cache"
 
 
+def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract zf into dest, rejecting members that would escape dest.
+
+    Guards against Zip Slip (path traversal via `../` or absolute paths
+    in a zip member) for a file downloaded from a remote server.
+    """
+    dest = dest.resolve()
+    for name in zf.namelist():
+        target = (dest / name).resolve()
+        if target != dest and dest not in target.parents:
+            raise ValueError(f"unsafe path in zip member: {name!r}")
+    zf.extractall(dest)
+
+
 @pytest.fixture(scope="session")
 def raw_bundle():
     """Path to a small Waters .raw bundle.
@@ -54,7 +68,7 @@ def raw_bundle():
         ) as f:
             shutil.copyfileobj(resp, f)
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(CACHE_DIR)
+            _safe_extract(zf, CACHE_DIR)
     except OSError as e:
         pytest.skip(f"could not download Waters test bundle: {e}")
     finally:
