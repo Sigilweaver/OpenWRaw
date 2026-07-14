@@ -219,8 +219,15 @@ pub enum DecodedSpectrum {
 ///
 /// Returns `(offset, length, retention_time_min)`. Trailing scans take the
 /// length implied by `entry.dat_size`.
+///
+/// `dat_offset` and (for Variant B) the next record's `dat_offset` are raw
+/// fields read straight from the `.IDX` file, so `length` is capped against
+/// `entry.dat_size` (the real, already-known size of the paired `.DAT` file)
+/// before returning: an IDX record claiming a scan larger than the DAT file
+/// that actually exists must not be able to force an allocation sized from
+/// unvalidated file-controlled offsets in `read_slice`.
 fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64, f32)> {
-    match &entry.scan_index {
+    let (offset, length, retention_time_min) = match &entry.scan_index {
         ScanIndex::A(records) => {
             let rec = records.get(scan_idx).ok_or_else(|| {
                 crate::Error::Parse(format!(
@@ -231,7 +238,7 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
             // Variant A stores n_records directly: each record is 6 bytes.
             let offset = rec.dat_offset as u64;
             let length = (rec.n_records as u64) * 6;
-            Ok((offset, length, rec.retention_time_min))
+            (offset, length, rec.retention_time_min)
         }
         ScanIndex::B(records) => {
             let rec = records.get(scan_idx).ok_or_else(|| {
@@ -246,9 +253,11 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                 .map(|r| r.dat_offset as u64)
                 .unwrap_or(entry.dat_size);
             let length = next_offset.saturating_sub(offset);
-            Ok((offset, length, rec.retention_time_min))
+            (offset, length, rec.retention_time_min)
         }
-    }
+    };
+    let remaining = entry.dat_size.saturating_sub(offset);
+    Ok((offset, length.min(remaining), retention_time_min))
 }
 
 fn read_slice(path: &Path, offset: u64, length: u64) -> crate::Result<Vec<u8>> {
@@ -272,4 +281,128 @@ pub fn encoding_counts(reader: &Reader) -> BTreeMap<&'static str, usize> {
         *out.entry(key).or_insert(0) += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::raw::functions_inf::FunctionInfo;
+    use crate::raw::header::FunctionCal;
+    use crate::raw::index::{ScanIndexA, ScanIndexB};
+
+    fn dummy_info(index: u32) -> FunctionInfo {
+        FunctionInfo {
+            index,
+            function_type: 0,
+            scan_subtype: 0,
+            cycle_time_s: 0.0,
+            interscan_delay_s: 0.0,
+            scan_time_s: 0.0,
+            tof_depth: 0,
+            mz_low: 0.0,
+            mz_high: 0.0,
+        }
+    }
+
+    fn entry_with(scan_index: ScanIndex, dat_size: u64) -> FunctionEntry {
+        FunctionEntry {
+            index: 1,
+            info: dummy_info(1),
+            scan_index,
+            dat_path: PathBuf::new(),
+            dat_size,
+            encoding: Encoding::C,
+            cal: FunctionCal::default(),
+        }
+    }
+
+    // A corrupt/malicious IDX can claim a scan far larger than the real DAT
+    // file: dat_offset=0 for this scan, dat_offset=u32::MAX-1 for the "next"
+    // scan used to compute Variant B's length by subtraction. Before this
+    // was capped, `read_slice` would allocate a `Vec` sized from that
+    // difference (up to ~4.29 GB) regardless of how small the real DAT file
+    // on disk actually is - which aborts the process under a virtual-memory
+    // limit rather than returning a recoverable error.
+    #[test]
+    fn variant_b_scan_slice_caps_length_to_dat_size() {
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: 0,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: u32::MAX - 1,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            64, // real DAT file is tiny
+        );
+        let (offset, length, _) = scan_slice(&entry, 0).unwrap();
+        assert_eq!(offset, 0);
+        assert!(length <= 64, "length {length} exceeds dat_size 64");
+    }
+
+    #[test]
+    fn variant_b_offset_beyond_dat_size_yields_zero_length() {
+        let entry = entry_with(
+            ScanIndex::B(vec![ScanIndexB {
+                dat_offset: 1_000_000,
+                retention_time_min: 0.0,
+            }]),
+            64,
+        );
+        let (_, length, _) = scan_slice(&entry, 0).unwrap();
+        assert_eq!(length, 0);
+    }
+
+    #[test]
+    fn variant_b_normal_scan_is_unaffected() {
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: 0,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: 40,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            100,
+        );
+        let (offset, length, _) = scan_slice(&entry, 0).unwrap();
+        assert_eq!(offset, 0);
+        assert_eq!(length, 40);
+    }
+
+    #[test]
+    fn variant_a_scan_slice_caps_length_to_dat_size() {
+        let entry = entry_with(
+            ScanIndex::A(vec![ScanIndexA {
+                dat_offset: 0,
+                n_records: u16::MAX, // claims 393,210 bytes
+                retention_time_min: 0.0,
+                peak_count: 0,
+            }]),
+            64,
+        );
+        let (_, length, _) = scan_slice(&entry, 0).unwrap();
+        assert!(length <= 64, "length {length} exceeds dat_size 64");
+    }
+
+    #[test]
+    fn variant_a_normal_scan_is_unaffected() {
+        let entry = entry_with(
+            ScanIndex::A(vec![ScanIndexA {
+                dat_offset: 0,
+                n_records: 5,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            }]),
+            100,
+        );
+        let (_, length, _) = scan_slice(&entry, 0).unwrap();
+        assert_eq!(length, 30);
+    }
 }
