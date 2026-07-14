@@ -83,6 +83,14 @@ jobs:
   fuzz:
     name: fuzz (build + seed corpus smoke run)
     runs-on: ubuntu-latest
+    env:
+      # Unset the workflow-level `-D warnings`: cargo-fuzz appends the
+      # inherited RUSTFLAGS to its own sanitizer/coverage instrumentation
+      # flags rather than replacing them, so on the nightly toolchain this
+      # job builds with, a new nightly-only lint (in this crate or a
+      # dependency) would hard-fail CI even when the stable-toolchain jobs
+      # stay clean.
+      RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
 
