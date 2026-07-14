@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-07-14
+
 ### Added
 
 - Python-side `tests/` directory with a pytest suite exercising every
@@ -17,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$WATERS_ZIP_URL` bundle `ci.yml`'s `validate-mzml` job already uses. CI's
   `python` job now installs `pytest`, downloads the bundle, and runs the
   suite after `maturin develop`. Fixes #1. (@Nabejo)
+- `fuzz/`: a `cargo fuzz` target (`fuzz_reader`) over the reader entry
+  point (`Reader::open` + `Reader::iter_spectra`), exercising the full
+  decode pipeline - metadata parsing, scan index, and the Encoding A/B/C
+  decoders - from a single fuzzer-supplied byte string. Seeded from the
+  same public PXD058812 bundle used elsewhere in CI, a minimal synthetic
+  bundle, and a regression input locking in the allocation-cap fix above.
+  CI now builds the fuzz target and smoke-runs it against the seed corpus
+  on every PR. Part of #3. (@Nabejo)
 
 ### Fixed
 
@@ -37,17 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returning a `Result::Err`. `scan_slice` now caps the computed length
   against the real `.DAT` file size for both Variant A and Variant B scans.
   Fixes #3. (@Nabejo)
-
-### Added
-
-- `fuzz/`: a `cargo fuzz` target (`fuzz_reader`) over the reader entry
-  point (`Reader::open` + `Reader::iter_spectra`), exercising the full
-  decode pipeline - metadata parsing, scan index, and the Encoding A/B/C
-  decoders - from a single fuzzer-supplied byte string. Seeded from the
-  same public PXD058812 bundle used elsewhere in CI, a minimal synthetic
-  bundle, and a regression input locking in the allocation-cap fix above.
-  CI now builds the fuzz target and smoke-runs it against the seed corpus
-  on every PR. Part of #3. (@Nabejo)
 
 ## [1.2.3] - 2026-07-13
 
