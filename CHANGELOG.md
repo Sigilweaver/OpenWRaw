@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python-side `tests/` directory with a pytest suite exercising every
+  `RawReader` method and return type (`RunHeader`, `FunctionInfo`,
+  `ChromChannel`, `ChromPoint`, `Spectrum`, `ImsSpectrum`) against a real
+  Waters bundle, asserting on shape/type rather than exact values per the
+  clean-room policy. The `raw_bundle` fixture downloads and caches the same
+  `$WATERS_ZIP_URL` bundle `ci.yml`'s `validate-mzml` job already uses. CI's
+  `python` job now installs `pytest`, downloads the bundle, and runs the
+  suite after `maturin develop`. Fixes #1. (@Nabejo)
+
 ### Fixed
 
 - CI (`ci.yml`): the `python` job now also runs on `windows-latest`, so the
