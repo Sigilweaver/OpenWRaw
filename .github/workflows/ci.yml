@@ -80,6 +80,29 @@ jobs:
       - name: Smoke import
         run: .venv/bin/python -c "import openwraw; print(openwraw.__name__)"
 
+  fuzz:
+    name: fuzz (build + seed corpus smoke run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "fuzz -> target"
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz target
+        run: cargo +nightly fuzz build
+
+      - name: Run against the tracked seed corpus (no mutation)
+        run: cargo +nightly fuzz run fuzz_reader fuzz/seed_corpus -- -runs=0
+
   validate-mzml:
     name: mzML XSD validation
     runs-on: ubuntu-latest
