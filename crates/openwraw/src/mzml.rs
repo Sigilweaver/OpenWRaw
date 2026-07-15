@@ -19,6 +19,7 @@ use std::path::Path;
 
 use openmassspec_core as msc;
 
+use crate::raw::chroms::{read_chro_dat, ChromsInf};
 use crate::raw::data::ImsSpectrum;
 use crate::reader::{DecodedScan, DecodedSpectrum, Reader};
 
@@ -229,6 +230,75 @@ fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
     }
 }
 
+/// Map a `_CHROMS.INF` channel's engineering units to a PSI-MS chromatogram
+/// type term, verified against psi-ms.obo.
+///
+/// Only units with an exact, unambiguous CV match are mapped. Channels like
+/// "BSM Composition B" (%) or "(1) Peltier Engine Power" (% Power) have no
+/// corresponding PSI-MS chromatogram-type term (checked: the only children of
+/// `MS:1000626` "chromatogram type" are ion-current/electromagnetic-radiation
+/// variants plus temperature/pressure/flow-rate) - those channels are left
+/// out of [`chromatogram_records_for`] rather than mislabeled or defaulted to
+/// "total ion current chromatogram".
+fn chromatogram_type_for_units(units: &str) -> Option<msc::CvTerm> {
+    let u = units.trim();
+    if u.ends_with("/min") {
+        return Some(msc::CvTerm::new("MS:1003020", "flow rate chromatogram"));
+    }
+    if u.eq_ignore_ascii_case("psi") || u.eq_ignore_ascii_case("bar") || u.eq_ignore_ascii_case("kpa")
+    {
+        return Some(msc::CvTerm::new("MS:1003019", "pressure chromatogram"));
+    }
+    if u.contains('\u{00B0}') {
+        // Degree sign present -> temperature, whether °C or °F.
+        return Some(msc::CvTerm::new("MS:1002715", "temperature chromatogram"));
+    }
+    None
+}
+
+/// Decode every mappable instrument channel in `_CHROMS.INF`/`_CHROnnnn.DAT`
+/// into `openmassspec_core` chromatogram records.
+///
+/// Returns an empty vec (not an error) when `_CHROMS.INF` is absent, per its
+/// own docs: direct-infusion / pure-MS bundles don't record LC channels.
+/// Likewise a channel or its companion `.DAT` file that fails to parse is
+/// skipped rather than aborting the whole run, matching `iter_spectra`'s
+/// skip-on-decode-failure contract.
+fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
+    let inf_path = dir.join("_CHROMS.INF");
+    if !inf_path.exists() {
+        return Vec::new();
+    }
+    let Ok(inf) = ChromsInf::from_path(&inf_path) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for ch in &inf.channels {
+        let Some(chromatogram_type) = chromatogram_type_for_units(&ch.units) else {
+            continue;
+        };
+        let chro_num = inf.chro_number_for_channel(ch.index);
+        let dat_path = dir.join(format!("_CHRO{chro_num:03}.DAT"));
+        let Ok(points) = read_chro_dat(&dat_path) else {
+            continue;
+        };
+        let scale = ch.scale_f as f32;
+        let time_sec = points.iter().map(|p| p.rt_min * 60.0).collect();
+        let intensity = points.iter().map(|p| p.value * scale).collect();
+        out.push(msc::ChromatogramRecord {
+            index: out.len(),
+            id: ch.name.clone(),
+            chromatogram_type: Some(chromatogram_type),
+            precursor_mz: None,
+            product_mz: None,
+            time_sec,
+            intensity,
+        });
+    }
+    out
+}
+
 /// Collect every decoded scan in a bundle into `openmassspec_core` records.
 pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
     let mut out: Vec<msc::SpectrumRecord> = Vec::with_capacity(reader.total_scan_count());
@@ -360,6 +430,9 @@ impl msc::SpectrumSource for WatersSource {
     fn spectrum_count_hint(&self) -> Option<usize> {
         Some(self.reader.total_scan_count())
     }
+    fn iter_chromatograms<'s>(&'s mut self) -> Box<dyn Iterator<Item = msc::ChromatogramRecord> + 's> {
+        Box::new(chromatogram_records_for(&self.reader.dir).into_iter())
+    }
 }
 
 /// Convenience wrapper: open `dir`, decode every scan, emit mzML.
@@ -420,5 +493,130 @@ mod tests {
         assert_eq!(parse_acquired_datetime("14-Xyz-2021", "16:20:52"), None);
         assert_eq!(parse_acquired_datetime("32-Jan-2021", "16:20:52"), None);
         assert_eq!(parse_acquired_datetime("14-Jan-2021", "25:00:00"), None);
+    }
+
+    // Regression test: every (units, accession) pair here was checked
+    // directly against psi-ms.obo's children of MS:1000626 "chromatogram
+    // type" (only ion-current/electromagnetic-radiation plus
+    // temperature/pressure/flow-rate exist - there is no CV term for e.g.
+    // solvent composition % or heater power %, so those must resolve to
+    // `None` rather than being mislabeled).
+    #[test]
+    fn chromatogram_type_for_units_resolves_known_units_to_correct_psi_ms_accessions() {
+        let cases = [
+            ("\u{00B5}L/min", Some(("MS:1003020", "flow rate chromatogram"))),
+            ("mL/min", Some(("MS:1003020", "flow rate chromatogram"))),
+            ("psi", Some(("MS:1003019", "pressure chromatogram"))),
+            ("bar", Some(("MS:1003019", "pressure chromatogram"))),
+            (
+                "\u{00B0}C",
+                Some(("MS:1002715", "temperature chromatogram")),
+            ),
+            (
+                "\u{00B0}F",
+                Some(("MS:1002715", "temperature chromatogram")),
+            ),
+            ("%", None),
+            ("% Power", None),
+        ];
+        for (units, expected) in cases {
+            let got = chromatogram_type_for_units(units);
+            match expected {
+                Some((acc, name)) => {
+                    let cv = got.unwrap_or_else(|| panic!("expected a CV term for {units:?}"));
+                    assert_eq!(cv.accession, acc, "wrong accession for units {units:?}");
+                    assert_eq!(cv.name, name, "wrong CV name for units {units:?}");
+                }
+                None => assert!(got.is_none(), "expected no CV term for units {units:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn chromatogram_records_for_empty_when_chroms_inf_absent() {
+        let dir = std::env::temp_dir().join("openwraw-test-no-chroms-inf");
+        let _ = std::fs::create_dir_all(&dir);
+        let records = chromatogram_records_for(&dir);
+        assert!(records.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Build a minimal, valid synthetic `.raw/` chromatogram pair: one
+    /// mappable channel (flow rate) and one unmappable channel (%
+    /// composition), matching the byte layouts documented in
+    /// `raw::chroms` and its own corpus-derived tests.
+    #[test]
+    fn chromatogram_records_for_parses_synthetic_channels_and_skips_unmapped_units() {
+        let dir = std::env::temp_dir().join("openwraw-test-synthetic-chroms");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // -- _CHROMS.INF: header + 2 meta records + 2 data records --
+        const RECORD_SIZE: usize = 85;
+        let mut inf = vec![0u8; 128];
+        inf[0..2].copy_from_slice(&128u16.to_le_bytes());
+        inf[2..4].copy_from_slice(&1u16.to_le_bytes());
+        inf[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes());
+        inf[6..8].copy_from_slice(&2u16.to_le_bytes());
+
+        let make_meta = |meta_type: u32, name: &str| {
+            let mut r = vec![0u8; RECORD_SIZE];
+            r[0..4].copy_from_slice(&meta_type.to_le_bytes());
+            r[4..4 + name.len()].copy_from_slice(name.as_bytes());
+            r
+        };
+        inf.extend(make_meta(1, "Flags"));
+        inf.extend(make_meta(2, "Description"));
+
+        let make_data = |source_type: u32, name: &str, cc: &str| {
+            let mut r = vec![0u8; RECORD_SIZE];
+            r[0..4].copy_from_slice(&source_type.to_le_bytes());
+            let payload = &mut r[4..RECORD_SIZE];
+            payload[..name.len()].copy_from_slice(name.as_bytes());
+            let cc_start = name.len() + 1;
+            payload[cc_start..cc_start + cc.len()].copy_from_slice(cc.as_bytes());
+            r
+        };
+        // Channel 0: flow rate (mappable) -> _CHRO003.DAT
+        inf.extend(make_data(4, "BSM Flow Rate A", "$CC$,1.0,3,0,0,mL/min"));
+        // Channel 1: composition % (no CV term) -> _CHRO004.DAT, should be skipped
+        inf.extend(make_data(4, "BSM Composition B", "$CC$,1.0,3,0,0,%"));
+
+        std::fs::write(dir.join("_CHROMS.INF"), &inf).unwrap();
+
+        let make_chro_dat = |points: &[(f32, f32)]| {
+            let mut bytes = vec![0u8; 128];
+            bytes[0..2].copy_from_slice(&128u16.to_le_bytes());
+            bytes[2..4].copy_from_slice(&1u16.to_le_bytes());
+            bytes[4..6].copy_from_slice(&8u16.to_le_bytes());
+            bytes[6..8].copy_from_slice(&2u16.to_le_bytes());
+            for &(rt, val) in points {
+                bytes.extend_from_slice(&rt.to_le_bytes());
+                bytes.extend_from_slice(&val.to_le_bytes());
+            }
+            bytes
+        };
+        std::fs::write(
+            dir.join("_CHRO003.DAT"),
+            make_chro_dat(&[(0.0, 100.0), (0.5, 200.0)]),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("_CHRO004.DAT"),
+            make_chro_dat(&[(0.0, 95.0), (0.5, 96.0)]),
+        )
+        .unwrap();
+
+        let records = chromatogram_records_for(&dir);
+        assert_eq!(records.len(), 1, "the % channel should be skipped");
+        let rec = &records[0];
+        assert_eq!(rec.id, "BSM Flow Rate A");
+        assert_eq!(
+            rec.chromatogram_type.as_ref().unwrap().accession,
+            "MS:1003020"
+        );
+        assert_eq!(rec.time_sec, vec![0.0, 30.0]); // rt_min * 60
+        assert_eq!(rec.intensity, vec![100.0, 200.0]); // scale_f = 1.0
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

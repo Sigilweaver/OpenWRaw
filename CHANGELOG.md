@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `WatersSource::iter_chromatograms` (Sigilweaver/OpenWRaw#9): decodes
+  `_CHROMS.INF`/`_CHROnnnn.DAT` instrument channels (pump pressure, flow
+  rate, temperature) into `openmassspec_core::ChromatogramRecord`. Only
+  channels whose units map to a real PSI-MS chromatogram-type term
+  (pressure/flow-rate/temperature, verified against psi-ms.obo) are
+  emitted; channels with no CV match (e.g. solvent composition %, heater
+  power %) are skipped rather than mislabeled or defaulted to "total ion
+  current chromatogram".
+
 ## [1.2.5] - 2026-07-15
 
 ### Fixed
