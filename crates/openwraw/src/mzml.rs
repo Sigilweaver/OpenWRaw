@@ -49,8 +49,30 @@ fn native_id_format_cv() -> msc::CvTerm {
 /// variants for each of those models (e.g. `Synapt G2-S HDMS` vs.
 /// `Synapt G2-S MS`), and the header string alone doesn't say which
 /// acquisition mode a given file used - picking one would be a guess, not
-/// a verified mapping. They fall through to the generic Waters term below
-/// until that's resolved (tracked separately).
+/// a verified mapping. They fall through to the generic Waters term below.
+///
+/// Investigated (Sigilweaver/OpenWRaw#11) and ruled out as disambiguating
+/// signals:
+/// - `_FUNCnnn.IDX` record variant (A vs B): Variant B is shared by IMS
+///   (SYNAPT) and non-IMS (Xevo G2-XS) instruments, so it tells us nothing
+///   about HDMS-vs-MS mode even for models it does apply to (see
+///   `docs/format/03-func-idx.md`, "Distinguishing Variant A from B").
+/// - `Apex3DIons.csv` / `Apex3Dnnn.bin` presence: only written when the
+///   optional Apex3D post-processing module was run, so presence weakly
+///   implies IMS but absence proves nothing (see
+///   `docs/format/11-apex3d-bin.md`).
+/// - `_extern.inf` pusher fields (`PusherInterval` / `Pusher Cycle Time`):
+///   present on both IMS and non-IMS Q-Tof/Synapt instruments alike (pusher
+///   is a standard orthogonal-acceleration TOF component, not IMS-specific).
+///
+/// No sample files for `SYNAPT G2-S`, `SYNAPT G2`, or bare `SYNAPT` exist in
+/// the corpus to test any of this against empirically (the corpus's one
+/// bare-QTOF sample, PXD058812, reports `Instrument: QTOF` in `_HEADER.TXT`,
+/// not a Synapt string at all - an older Q-Tof-family unit, not a Synapt
+/// running in MS mode). Absent a real HDMS-mode and MS-mode pair of files
+/// from the same model to compare, this is a data-availability gap, not
+/// something more code-reading can resolve. The generic Waters term is the
+/// correct permanent answer here unless real sample files surface.
 fn instrument_cv(name: &str) -> msc::CvTerm {
     let up = name.to_ascii_uppercase();
     let known: &[(&str, &str, &str)] = &[
