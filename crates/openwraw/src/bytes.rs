@@ -33,3 +33,8 @@ pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32> {
 pub(crate) fn read_f32_le(bytes: &[u8], offset: usize) -> Result<f32> {
     Ok(f32::from_le_bytes(slice_at::<4>(bytes, offset, "f32")?))
 }
+
+#[inline]
+pub(crate) fn read_i16_le(bytes: &[u8], offset: usize) -> Result<i16> {
+    Ok(i16::from_le_bytes(slice_at::<2>(bytes, offset, "i16")?))
+}

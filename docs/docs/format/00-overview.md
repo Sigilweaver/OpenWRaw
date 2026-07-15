@@ -37,13 +37,19 @@ typical experiment structure:
 | Experiment type | Functions |
 |-----------------|-----------|
 | MS survey only | Function 1 = MS1 |
-| DDA (auto-MS/MS) | Function 1 = survey, Functions 2-N = triggered MS/MS |
+| MSe / HDMSe (broadband) | Function 1 = low-energy, Function 2 = high-energy (both `TOF PARENT FUNCTION`, `Precursor Selection: Everything` - no discrete precursor) |
+| Targeted MS/MS | Function 1 = `TOF MSMS FUNCTION` with a fixed `Set Mass` (single precursor per acquisition, not survey-triggered) |
 | IMS-MS (HDMS) | Function 1 = IMS-MS, Function 2 = reference/lock-mass |
 | Lock-mass reference | Last function = calibrant channel |
 
 An MRM experiment (triple-quadrupole) would have one function per
 precursor/product pair. MRM data is rare in public repositories and
 this format variant has not yet been observed in corpus data.
+
+The corpus's one targeted-MS/MS sample so far (PXD035818, single
+"TOF MSMS FUNCTION" per file) is a fixed-precursor direct-infusion
+acquisition, not a classic multi-function survey-then-trigger DDA method;
+no real sample of the latter has been found yet either (Sigilweaver/OpenWRaw#13).
 
 ## DAT Encoding Variants
 
@@ -144,6 +150,7 @@ _CHROMS.INF uses a 128-byte header + 85-byte records (different stride).
 | PXD066594 | SYNAPT G2-Si IMS | WANG.raw, 590 scans, large IMS data |
 | PXD068881 | SYNAPT G2-Si IMS | CtpA LC-MS, 1138 scans, has CHROMS.INF |
 | PXD075602 | Xevo G2-XS QTof | DHPR LC-MS, 3 functions, Encoding C |
+| PXD035818 | SYNAPT G2-S | 17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw, targeted MS/MS (`TOF MSMS FUNCTION`, Set Mass 884.9), Encoding B (IMS-style records; TriWave hardware present even for this non-IMS-separated acquisition) |
 
 ## See Also
 

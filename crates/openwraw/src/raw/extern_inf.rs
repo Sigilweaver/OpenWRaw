@@ -86,6 +86,16 @@ pub struct ExternFunction {
     pub pusher_interval_us: Option<f64>,
     /// Acquisition mode derived from the section-header tail.
     pub mode: FunctionMode,
+    /// Targeted precursor m/z from the `Set Mass` field (Da).
+    ///
+    /// Only present for `TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION`
+    /// sections (`FunctionMode::Msms` / `Daughter`) - confirmed against two
+    /// real targeted-MS/MS corpus samples (Sigilweaver/OpenWRaw#13:
+    /// PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw,
+    /// PXD035818/18122020_PEP101_2.raw). `TOF PARENT FUNCTION` (MSe/HDMSe)
+    /// sections never have this field - broadband fragmentation of
+    /// `Precursor Selection: Everything` has no discrete precursor to set.
+    pub set_mass_da: Option<f64>,
 }
 
 /// Parsed contents of a Waters `_extern.inf` file.
@@ -175,6 +185,7 @@ impl std::str::FromStr for ExternInf {
                         end_mass_da: 0.0,
                         pusher_interval_us: None,
                         mode,
+                        set_mass_da: None,
                     });
                 }
                 continue;
@@ -244,6 +255,13 @@ impl std::str::FromStr for ExternInf {
                     if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
                         if let Some(f) = functions.get_mut(&n) {
                             f.pusher_interval_us = Some(v);
+                        }
+                    }
+                }
+                "Set Mass" => {
+                    if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
+                        if let Some(f) = functions.get_mut(&n) {
+                            f.set_mass_da = Some(v);
                         }
                     }
                 }
@@ -440,6 +458,64 @@ End Mass                                       2000.0\r\n\
             (a - 1.5129).abs() < 1e-3,
             "A_us={a}, expected ≈1.5129 µs/sqrt(Da)"
         );
+    }
+
+    // PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw (Sigilweaver/OpenWRaw#13
+    // corpus acquisition): SYNAPT G2-S targeted MS/MS ("TOF MSMS FUNCTION"),
+    // Set Mass = 884.9.
+    const EXTERN_PXD035818_MSMS: &str = "\
+Parameters for C:\\MassLynx\\BlueWater\\tuneexp.exp\r\n\
+ \r\n\
+Instrument Configuration:\r\n\
+Lteff\t1800.0\r\n\
+Veff\t7189.15\r\n\
+PusherInterval\t69.000000\r\n\
+ \r\n\
+Function Parameters - Function 1 - TOF MSMS FUNCTION\r\n\
+Scan Time (sec)\t1.000\r\n\
+Interscan Time (sec)\t0.015\r\n\
+Set Mass\t884.9\r\n\
+Start Mass\t50.0\r\n\
+MSMS End Mass\t2000.0\r\n\
+";
+
+    #[test]
+    fn parse_targeted_msms_set_mass() {
+        let ext: ExternInf = EXTERN_PXD035818_MSMS.parse().unwrap();
+        let f1 = ext.functions.get(&1).expect("Function 1 missing");
+        assert_eq!(f1.mode, FunctionMode::Msms);
+        assert!((f1.set_mass_da.expect("Set Mass missing") - 884.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_mass_absent_for_ms_and_mse_functions() {
+        let ext: ExternInf = EXTERN_PXD058812.parse().unwrap();
+        assert!(ext.functions.get(&1).unwrap().set_mass_da.is_none());
+        let ext: ExternInf = EXTERN_PXD075602.parse().unwrap();
+        for n in 1..=3u32 {
+            assert!(ext.functions.get(&n).unwrap().set_mass_da.is_none());
+        }
+    }
+
+    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
+    /// out as a sibling of this repo; skip silently when it's absent.
+    fn corpus_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../SpecLance/corpus/waters")
+    }
+
+    #[test]
+    fn corpus_pxd035818_targeted_msms_set_mass() {
+        let path =
+            corpus_dir().join("PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw/_extern.inf");
+        if !path.exists() {
+            return;
+        }
+        let ext = ExternInf::from_path(&path).unwrap();
+        let f1 = ext.functions.get(&1).expect("Function 1 missing");
+        assert_eq!(f1.mode, FunctionMode::Msms);
+        let mz = f1.set_mass_da.expect("Set Mass missing");
+        assert!((mz - 884.9).abs() < 1e-6, "Set Mass = {mz}, expected 884.9");
     }
 
     #[test]

@@ -230,6 +230,54 @@ fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
     }
 }
 
+/// Build a spectrum's `PrecursorInfo`, or `None` for MS1 (and any other
+/// function this reader has no precursor signal for at all).
+///
+/// Two independent, corpus-verified sources feed this (Sigilweaver/OpenWRaw#8,
+/// #13):
+/// * `target_mz` from `_extern.inf`'s `Set Mass` field, present only on
+///   `TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION` sections (real targeted
+///   MS/MS - a fixed precursor list or SRM-like acquisition). `TOF PARENT
+///   FUNCTION` (MSe/HDMSe) sections never have this field: broadband
+///   `Precursor Selection: Everything` fragmentation has no discrete
+///   precursor to set, so `None` here is correct, not a decoding gap.
+/// * `collision_energy` from `_FUNCnnn.STS`'s per-scan "Collision Energy"
+///   channel, which is independent of `target_mz` and is populated for MSe
+///   functions too (Waters records a real collision energy for the
+///   high-energy MSe scan even though it has no discrete precursor).
+///
+/// Returns `None` (rather than `Some` with every field `None`) when neither
+/// source has anything to report, so a spectrum with genuinely no precursor
+/// information looks the same as it did before this field was wired up.
+///
+/// No charge state or isolation width field has been found in either file
+/// for any corpus sample (targeted or MSe); this is a real gap in what
+/// `_extern.inf`/`_FUNCnnn.STS` expose, not an oversight in this function.
+fn precursor_info_for(
+    reader: &Reader,
+    function_index: u32,
+    ms_level: u32,
+    collision_energy_ev: Option<f64>,
+) -> Option<msc::PrecursorInfo> {
+    if ms_level < 2 {
+        return None;
+    }
+    let target_mz = reader
+        .extern_inf
+        .functions
+        .get(&function_index)
+        .and_then(|f| f.set_mass_da);
+    if target_mz.is_none() && collision_energy_ev.is_none() {
+        return None;
+    }
+    Some(msc::PrecursorInfo {
+        target_mz,
+        collision_energy: collision_energy_ev,
+        ce_is_nce: false,
+        ..Default::default()
+    })
+}
+
 /// Map a `_CHROMS.INF` channel's engineering units to a PSI-MS chromatogram
 /// type term, verified against psi-ms.obo.
 ///
@@ -323,6 +371,7 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
         scan_idx,
         retention_time_min,
         spectrum,
+        collision_energy_ev,
     } = scan;
     let (mz, intensity, mobility) = match spectrum {
         DecodedSpectrum::Plain(s) => (s.mz, s.intensity, None),
@@ -333,6 +382,7 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
     };
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
     let ms_level = ms_level_for_function(reader, function_index);
+    let precursor = precursor_info_for(reader, function_index, ms_level, collision_energy_ev);
     msc::SpectrumRecord {
         index: (scan_counter as usize).saturating_sub(1),
         scan_number: scan_counter,
@@ -351,7 +401,7 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
         ion_injection_time_ms: None,
         inv_mobility: None,
         faims_cv: None, // Waters instruments have no FAIMS interface.
-        precursor: None,
+        precursor,
         mz,
         intensity,
         inv_mobility_per_peak: mobility,
@@ -529,6 +579,74 @@ mod tests {
                 }
                 None => assert!(got.is_none(), "expected no CV term for units {units:?}"),
             }
+        }
+    }
+
+    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
+    /// out as a sibling of this repo; skip silently when it's absent.
+    fn corpus_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../SpecLance/corpus/waters")
+    }
+
+    // Sigilweaver/OpenWRaw#8 / #13: targeted MS/MS ("TOF MSMS FUNCTION", Set
+    // Mass = 884.9) must populate `precursor.target_mz`, unlike the
+    // broadband MSe/HDMSe corpus this crate previously had exclusive access
+    // to, which has no discrete precursor at all.
+    #[test]
+    fn corpus_pxd035818_targeted_msms_populates_precursor_target_mz() {
+        let dir = corpus_dir().join("PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw");
+        if !dir.exists() {
+            return;
+        }
+        let reader = Reader::open(&dir).unwrap();
+        let records = collect_records(&reader).unwrap();
+        assert!(!records.is_empty());
+        for rec in &records {
+            assert_eq!(rec.ms_level, 2, "every scan in this bundle is MS/MS");
+            let precursor = rec.precursor.as_ref().unwrap_or_else(|| {
+                panic!("scan {} missing precursor info entirely", rec.scan_number)
+            });
+            let mz = precursor
+                .target_mz
+                .unwrap_or_else(|| panic!("scan {} missing target_mz", rec.scan_number));
+            assert!(
+                (mz - 884.9).abs() < 1e-6,
+                "scan {}: target_mz = {mz}, expected 884.9",
+                rec.scan_number
+            );
+            assert!(!precursor.ce_is_nce);
+        }
+    }
+
+    // Sigilweaver/OpenWRaw#8: broadband HDMSe has no discrete precursor
+    // (`Precursor Selection: Everything`), so target_mz must stay None even
+    // though collision_energy is available from `_FUNCnnn.STS`.
+    #[test]
+    fn corpus_pxd075602_hdmse_has_collision_energy_but_no_target_mz() {
+        let dir = corpus_dir().join("PXD075602/DHPR_11257-1.raw");
+        if !dir.exists() {
+            return;
+        }
+        let reader = Reader::open(&dir).unwrap();
+        let records = collect_records(&reader).unwrap();
+        let ms2: Vec<_> = records.iter().filter(|r| r.ms_level == 2).collect();
+        assert!(!ms2.is_empty(), "expected at least one MSe MS2 scan");
+        for rec in &ms2 {
+            let precursor = rec
+                .precursor
+                .as_ref()
+                .unwrap_or_else(|| panic!("scan {} missing precursor info", rec.scan_number));
+            assert!(
+                precursor.target_mz.is_none(),
+                "HDMSe scan {} should have no discrete target_mz",
+                rec.scan_number
+            );
+            assert!(
+                precursor.collision_energy.is_some(),
+                "HDMSe scan {} should still report collision_energy from _FUNCnnn.STS",
+                rec.scan_number
+            );
         }
     }
 

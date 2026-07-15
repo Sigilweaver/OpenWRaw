@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Precursor metadata (Sigilweaver/OpenWRaw#8, #13): `SpectrumRecord::precursor`
+  is no longer hardcoded `None` for every spectrum. `target_mz` is now parsed
+  from `_extern.inf`'s `Set Mass` field on real targeted MS/MS functions
+  (`TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION`), confirmed against a new
+  corpus sample (PXD035818) found specifically to unblock this - the
+  existing corpus was exclusively broadband MSe/HDMSe
+  (`Precursor Selection: Everything`), which genuinely has no discrete
+  precursor and correctly keeps `target_mz: None`. Separately,
+  `collision_energy` is now read from `_FUNCnnn.STS`'s per-scan "Collision
+  Energy" channel (new `raw::func_sts` module) for every MS2 function,
+  including MSe - Waters records a real collision energy for the
+  high-energy MSe scan even without a discrete precursor. No charge state
+  or isolation width field has been found in either source file on any
+  corpus sample; those remain `None`.
 - `WatersSource::iter_chromatograms` (Sigilweaver/OpenWRaw#9): decodes
   `_CHROMS.INF`/`_CHROnnnn.DAT` instrument channels (pump pressure, flow
   rate, temperature) into `openmassspec_core::ChromatogramRecord`. Only

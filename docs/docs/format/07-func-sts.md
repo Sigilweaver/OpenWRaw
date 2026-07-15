@@ -112,9 +112,23 @@ The IDX `+0x08` field (30-byte Variant B, value labelled "Large value / TIC?")
 likely corresponds to one of the TIC Trace channels here. This cross-check
 has not yet been confirmed empirically.
 
+## Rust Implementation
+
+`crate::raw::func_sts::FuncSts` parses this file and exposes per-scan
+channel lookups by name; `FuncSts::collision_energy(scan_idx)` reads the
+"Collision Energy" channel specifically. `Reader::open` parses every
+function's `_FUNCnnn.STS` when present (silently `None` if absent or
+malformed - this file is supplementary, not required to decode peak data),
+and `mzml::precursor_info_for` uses it to populate
+`PrecursorInfo::collision_energy` for every MS2 function, including MSe/HDMSe
+(which has no discrete precursor `target_mz` but still reports a real
+per-scan collision energy) and targeted MS/MS (Sigilweaver/OpenWRaw#8, #13).
+
 ## Reference Sources
 
 - Empirical analysis: all `_FUNC001.STS` files in corpus
 - Corpus samples:
   - PXD058812/molecular_mass_P15_01.raw (25 channels, 63 bytes/scan)
   - PXD075602/DHPR_11257-1.raw (56 channels, 167 bytes/scan)
+  - PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw (targeted MS/MS,
+    confirms the same descriptor/channel layout on a non-MSe function)

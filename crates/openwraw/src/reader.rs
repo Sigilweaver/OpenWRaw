@@ -22,6 +22,7 @@ use crate::raw::data::{
     decode_encoding_a, decode_encoding_b, decode_encoding_c, DecodeParams, ImsSpectrum, Spectrum,
 };
 use crate::raw::extern_inf::ExternInf;
+use crate::raw::func_sts::FuncSts;
 use crate::raw::functions_inf::{FunctionInfo, FunctionTable};
 use crate::raw::header::{FunctionCal, Header};
 use crate::raw::index::ScanIndex;
@@ -54,6 +55,13 @@ pub struct FunctionEntry {
     pub encoding: Encoding,
     /// Calibration polynomial pulled from `_HEADER.TXT`.
     pub cal: FunctionCal,
+    /// Parsed `_FUNCnnn.STS` scan-statistics table, when the file is present
+    /// and well-formed. `None` for bundles that lack it (older instrument
+    /// generations) or where it fails to parse - a missing/bad STS file is
+    /// not fatal to opening the bundle, since it only supplies supplementary
+    /// per-scan housekeeping values (e.g. collision energy), not the peak
+    /// data itself.
+    pub sts: Option<FuncSts>,
 }
 
 impl FunctionEntry {
@@ -123,6 +131,9 @@ impl Reader {
                 .cloned()
                 .unwrap_or_default();
 
+            let sts_path = dir.join(format!("_FUNC{:03}.STS", info.index));
+            let sts = FuncSts::from_path(&sts_path).ok();
+
             functions.push(FunctionEntry {
                 index: info.index,
                 info: info.clone(),
@@ -131,6 +142,7 @@ impl Reader {
                 dat_size,
                 encoding,
                 cal,
+                sts,
             });
         }
 
@@ -174,11 +186,16 @@ impl Reader {
             Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
             Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
         };
+        let collision_energy_ev = entry
+            .sts
+            .as_ref()
+            .and_then(|sts| sts.collision_energy(scan_idx));
         Ok(DecodedScan {
             function_index,
             scan_idx,
             retention_time_min: rt_min,
             spectrum: decoded,
+            collision_energy_ev,
         })
     }
 
@@ -204,6 +221,9 @@ pub struct DecodedScan {
     pub scan_idx: usize,
     pub retention_time_min: f32,
     pub spectrum: DecodedSpectrum,
+    /// Per-scan collision energy (eV) from `_FUNCnnn.STS`'s "Collision
+    /// Energy" channel, when the file is present and defines that channel.
+    pub collision_energy_ev: Option<f64>,
 }
 
 /// Decoded payload of a scan; varies by encoding.
@@ -313,6 +333,7 @@ mod tests {
             dat_size,
             encoding: Encoding::C,
             cal: FunctionCal::default(),
+            sts: None,
         }
     }
 
