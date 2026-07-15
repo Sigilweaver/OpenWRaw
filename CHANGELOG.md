@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-07-15
+
+### Fixed
+
+- `instrument_cv`'s lookup table carried mostly-wrong PSI-MS accessions,
+  checked directly against psi-ms.obo rather than trusting the existing
+  table: of 11 entries, only `XEVO TQ-S` and the generic fallback pointed
+  at the right term. Some were wrong by a wide margin - `XEVO G2-XS QTOF`
+  resolved to `MS:1002472` ("trap-type collision-induced dissociation"),
+  bare `XEVO` resolved to `MS:1000533` ("Bioworks", unrelated Thermo
+  software). Fixed every unambiguous entry; dropped `SYNAPT G2-S`/
+  `SYNAPT G2`/bare `SYNAPT` rather than guess between the CV's separate
+  HDMS/MS variants for each (tracked in #11) - they fall through to the
+  generic Waters term instead of asserting a wrong specific one.
+- `start_timestamp` was built as `"{date} {time}"` from Waters' native
+  `"14-Jan-2021"`/`"16:20:52"` header strings - nowhere close to RFC
+  3339. Harmless while the shared writer silently dropped
+  `start_timestamp`; `openmassspec-core` 1.2.0 now emits it as an
+  `xs:dateTime` XML attribute, so this would have produced invalid mzML
+  the first time this crate's dependency was bumped. Reformats into
+  `YYYY-MM-DDTHH:MM:SSZ` (same trailing-Z-for-a-timezone-less-local-time
+  convention `opentfraw` uses for the identical problem).
+- Bumped `openmassspec-core` to 1.2.0 and added the `SpectrumRecord.faims_cv`
+  field it requires, fixing a build break: 1.2.0 added that field as
+  required, and `record_from_scan` constructed the struct literal without
+  it. Always `None` - Waters instruments have no FAIMS interface.
+
 ## [1.2.4] - 2026-07-14
 
 ### Added

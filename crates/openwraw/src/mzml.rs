@@ -258,6 +258,7 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
         high_mz,
         ion_injection_time_ms: None,
         inv_mobility: None,
+        faims_cv: None, // Waters instruments have no FAIMS interface.
         precursor: None,
         mz,
         intensity,
