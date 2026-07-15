@@ -293,7 +293,9 @@ fn chromatogram_type_for_units(units: &str) -> Option<msc::CvTerm> {
     if u.ends_with("/min") {
         return Some(msc::CvTerm::new("MS:1003020", "flow rate chromatogram"));
     }
-    if u.eq_ignore_ascii_case("psi") || u.eq_ignore_ascii_case("bar") || u.eq_ignore_ascii_case("kpa")
+    if u.eq_ignore_ascii_case("psi")
+        || u.eq_ignore_ascii_case("bar")
+        || u.eq_ignore_ascii_case("kpa")
     {
         return Some(msc::CvTerm::new("MS:1003019", "pressure chromatogram"));
     }
@@ -480,7 +482,9 @@ impl msc::SpectrumSource for WatersSource {
     fn spectrum_count_hint(&self) -> Option<usize> {
         Some(self.reader.total_scan_count())
     }
-    fn iter_chromatograms<'s>(&'s mut self) -> Box<dyn Iterator<Item = msc::ChromatogramRecord> + 's> {
+    fn iter_chromatograms<'s>(
+        &'s mut self,
+    ) -> Box<dyn Iterator<Item = msc::ChromatogramRecord> + 's> {
         Box::new(chromatogram_records_for(&self.reader.dir).into_iter())
     }
 }
@@ -554,7 +558,10 @@ mod tests {
     #[test]
     fn chromatogram_type_for_units_resolves_known_units_to_correct_psi_ms_accessions() {
         let cases = [
-            ("\u{00B5}L/min", Some(("MS:1003020", "flow rate chromatogram"))),
+            (
+                "\u{00B5}L/min",
+                Some(("MS:1003020", "flow rate chromatogram")),
+            ),
             ("mL/min", Some(("MS:1003020", "flow rate chromatogram"))),
             ("psi", Some(("MS:1003019", "pressure chromatogram"))),
             ("bar", Some(("MS:1003019", "pressure chromatogram"))),
