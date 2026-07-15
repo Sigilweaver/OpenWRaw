@@ -35,20 +35,31 @@ fn native_id_format_cv() -> msc::CvTerm {
     msc::CvTerm::new("MS:1000769", "Waters nativeID format")
 }
 
+/// Resolve a PSI-MS instrument CV term from the Waters `_HEADER.TXT`
+/// `Instrument` field. Falls back to the generic Waters term when the model
+/// string is unrecognized.
+///
+/// Every entry here was checked directly against psi-ms.obo (a prior
+/// version of this table had several fabricated-looking accessions, e.g.
+/// `XEVO G2-XS QTOF` pointed at `MS:1002472` = "trap-type
+/// collision-induced dissociation", a completely unrelated CV category).
+///
+/// `SYNAPT G2-S`, `SYNAPT G2`, and bare `SYNAPT` are deliberately *not* in
+/// this table: the real CV only defines "HDMS" and "MS" (non-HDMS)
+/// variants for each of those models (e.g. `Synapt G2-S HDMS` vs.
+/// `Synapt G2-S MS`), and the header string alone doesn't say which
+/// acquisition mode a given file used - picking one would be a guess, not
+/// a verified mapping. They fall through to the generic Waters term below
+/// until that's resolved (tracked separately).
 fn instrument_cv(name: &str) -> msc::CvTerm {
     let up = name.to_ascii_uppercase();
     let known: &[(&str, &str, &str)] = &[
-        ("SYNAPT G2-SI", "MS:1001769", "Synapt G2-Si"),
-        ("SYNAPT G2-S", "MS:1001768", "Synapt G2-S"),
-        ("SYNAPT G2", "MS:1001767", "Synapt G2"),
-        ("SYNAPT", "MS:1001766", "Synapt MS"),
-        ("XEVO G2-XS QTOF", "MS:1002472", "Xevo G2-XS QTof"),
-        ("XEVO-G2XSQTOF", "MS:1002472", "Xevo G2-XS QTof"),
-        ("XEVO G2 QTOF", "MS:1001790", "Xevo G2 QTof"),
+        ("SYNAPT G2-SI", "MS:1002726", "SYNAPT G2-Si"),
+        ("XEVO G2-XS QTOF", "MS:1003252", "Xevo G2-XS QTof"),
+        ("XEVO-G2XSQTOF", "MS:1003252", "Xevo G2-XS QTof"),
+        ("XEVO G2 QTOF", "MS:1001783", "Xevo G2 Q-Tof"),
         ("XEVO TQ-S", "MS:1001792", "Xevo TQ-S"),
-        ("XEVO TQ", "MS:1001791", "Xevo TQ"),
-        ("XEVO", "MS:1000533", "Xevo G2 Q-Tof"),
-        ("QTOF", "MS:1000031", "Waters instrument model"),
+        ("XEVO TQ", "MS:1001791", "Xevo TQD"),
     ];
     for (prefix, acc, term_name) in known {
         if up.starts_with(prefix) {
@@ -74,6 +85,53 @@ fn native_id_for(function_index: u32, scan_idx_zero_based: usize) -> String {
     )
 }
 
+/// Parse Waters' `Acquired Date` / `Acquired Time` header strings (e.g.
+/// `"14-Jan-2021"` / `"16:20:52"`) into an RFC 3339 string, or `None` if
+/// either doesn't match the expected format.
+///
+/// Like opentfraw's `acquisition_date_rfc3339`, the source value is the
+/// instrument's local wall-clock time with no recorded timezone offset; the
+/// trailing `Z` is a formatting convention, not a claim that this is a true
+/// UTC instant.
+fn parse_acquired_datetime(date: &str, time: &str) -> Option<String> {
+    let mut d = date.splitn(3, '-');
+    let day: u32 = d.next()?.parse().ok()?;
+    let month = match d.next()?.to_ascii_lowercase().as_str() {
+        "jan" => 1,
+        "feb" => 2,
+        "mar" => 3,
+        "apr" => 4,
+        "may" => 5,
+        "jun" => 6,
+        "jul" => 7,
+        "aug" => 8,
+        "sep" => 9,
+        "oct" => 10,
+        "nov" => 11,
+        "dec" => 12,
+        _ => return None,
+    };
+    let year: u32 = d.next()?.parse().ok()?;
+    if d.next().is_some() {
+        return None;
+    }
+
+    let mut t = time.splitn(3, ':');
+    let hour: u32 = t.next()?.parse().ok()?;
+    let minute: u32 = t.next()?.parse().ok()?;
+    let second: u32 = t.next()?.parse().ok()?;
+    if t.next().is_some() {
+        return None;
+    }
+    if !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
+    ))
+}
+
 /// Build a [`msc::RunMetadata`] from a [`Reader`].
 fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
     let instrument_name = reader
@@ -81,12 +139,12 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         .instrument
         .clone()
         .unwrap_or_else(|| "Waters".into());
-    let start_timestamp = reader.header.acquired_date.as_deref().map(|d| {
-        format!(
-            "{d} {}",
-            reader.header.acquired_time.as_deref().unwrap_or("")
-        )
-    });
+    let start_timestamp = reader
+        .header
+        .acquired_date
+        .as_deref()
+        .zip(reader.header.acquired_time.as_deref())
+        .and_then(|(d, t)| parse_acquired_datetime(d, t));
     msc::RunMetadata {
         source_file_name: reader.bundle_name.clone(),
         source_file_format: source_file_format_cv(),
@@ -293,4 +351,51 @@ pub fn write_indexed_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crat
     let mut src = WatersSource::open(dir)?;
     msc::write_indexed_mzml(&mut src, out).map_err(crate::Error::Io)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression test: every (name, accession) pair here was checked
+    // directly against psi-ms.obo, not copied from the prior table (which
+    // had several fabricated-looking accessions - e.g. bare "XEVO" pointed
+    // at MS:1000533 = "Bioworks", unrelated Thermo software).
+    #[test]
+    fn instrument_cv_resolves_known_models_to_correct_psi_ms_accessions() {
+        let cases = [
+            ("SYNAPT G2-Si", "MS:1002726", "SYNAPT G2-Si"),
+            ("Xevo G2-XS QTof", "MS:1003252", "Xevo G2-XS QTof"),
+            ("Xevo G2 QTof", "MS:1001783", "Xevo G2 Q-Tof"),
+            ("Xevo TQ-S", "MS:1001792", "Xevo TQ-S"),
+            ("Xevo TQ", "MS:1001791", "Xevo TQD"),
+            (
+                "some future model nobody has heard of",
+                "MS:1000126",
+                "Waters instrument model",
+            ),
+        ];
+        for (name, acc, term_name) in cases {
+            let cv = instrument_cv(name);
+            assert_eq!(cv.accession, acc, "wrong accession for {name:?}");
+            assert_eq!(cv.name, term_name, "wrong CV name for {name:?}");
+        }
+    }
+
+    #[test]
+    fn parse_acquired_datetime_formats_rfc3339_with_trailing_z() {
+        assert_eq!(
+            parse_acquired_datetime("14-Jan-2021", "16:20:52"),
+            Some("2021-01-14T16:20:52Z".into())
+        );
+    }
+
+    #[test]
+    fn parse_acquired_datetime_none_on_malformed_input() {
+        assert_eq!(parse_acquired_datetime("not-a-date", "16:20:52"), None);
+        assert_eq!(parse_acquired_datetime("14-Jan-2021", "not-a-time"), None);
+        assert_eq!(parse_acquired_datetime("14-Xyz-2021", "16:20:52"), None);
+        assert_eq!(parse_acquired_datetime("32-Jan-2021", "16:20:52"), None);
+        assert_eq!(parse_acquired_datetime("14-Jan-2021", "25:00:00"), None);
+    }
 }
