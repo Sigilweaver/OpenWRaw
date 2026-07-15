@@ -54,11 +54,11 @@ pip install openwraw
 Rust:
 
 ```rust
-use openwraw::RawReader;
+use openwraw::Reader;
 
-let r = RawReader::open("sample.raw")?;
-for f in r.functions() {
-    println!("function {}: {} scans", f.index, f.scan_count);
+let r = Reader::open("sample.raw")?;
+for f in &r.functions {
+    println!("function {}: {} scans", f.index, f.scan_count());
 }
 ```
 
@@ -79,7 +79,7 @@ quickstart, guide, and format specification.
 
 ```
 crates/
-  openwraw/      Core Rust library (69 tests)
+  openwraw/      Core Rust library (96 tests)
   openwraw-py/   PyO3 / maturin Python bindings
 docs/            Docusaurus site (format spec + guides)
 ```
