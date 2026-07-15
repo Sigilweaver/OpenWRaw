@@ -105,16 +105,16 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openmassspec-core"
-version = "1.1.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "970e92e2989e4c2da54bb2709b883f7b0203bbe684a145fc1c499699b3c2d8c5"
+checksum = "f32671b5db1da0db5b633cfb2405ab021408c8945e8d5ab8b7531385d8153f24"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "openwraw"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "openmassspec-core",
  "thiserror",
