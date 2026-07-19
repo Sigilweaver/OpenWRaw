@@ -17,7 +17,7 @@ Rust and Python reader for the Waters MassLynx RAW mass spectrometry
 data format. Cross-platform (Linux, macOS, Windows), with no native or
 system dependencies.
 
-Full documentation: [sigilweaver.app/openwraw/docs](https://sigilweaver.app/openwraw/docs)
+Documentation: [sigilweaver.app/openwraw/docs](https://sigilweaver.app/openwraw/docs)
 
 ## Install
 
@@ -89,4 +89,5 @@ docs/            Docusaurus site (format spec + guides)
 Apache-2.0. See [LICENSE](LICENSE).
 
 The format specification was developed by binary analysis of public
-mass-spectrometry datasets (PRIDE accessions).
+mass-spectrometry datasets (PRIDE accessions). See
+[ATTRIBUTION.md](ATTRIBUTION.md).
