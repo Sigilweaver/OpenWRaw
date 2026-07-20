@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-07-20
+
 ### Added
 
 - Precursor metadata (Sigilweaver/OpenWRaw#8, #13): `SpectrumRecord::precursor`
