@@ -173,10 +173,12 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         source_file_format: source_file_format_cv(),
         native_id_format: native_id_format_cv(),
         instrument: instrument_cv(&instrument_name),
+        instrument_serial_number: None,
         software_name: SOFTWARE_NAME.into(),
         software_version: SOFTWARE_VERSION.into(),
         start_timestamp,
         mobility_array_kind: Some(msc::MobilityArrayKind::DriftTimeMilliseconds),
+        analyzers: Vec::new(),
     }
 }
 
