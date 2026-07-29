@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Adapted `RunMetadata` construction to `openmassspec-core` 1.4.0's new
+  `acquisition_software_name`/`acquisition_software_version` fields
+  (defaulted to `None`; neither `_extern.inf` nor `_HEADER.TXT` parsing
+  in this reader currently exposes a MassLynx acquisition-software
+  version string as a struct field - `_HEADER.TXT`'s `Version` field is
+  documented as the MassLynx *file format* version, a different concept
+  - so wiring in a real value would mean adding new parsing, which is
+  out of scope here). Bumped the declared `openmassspec-core` minimum
+  to `"1.4.0"` to match (Sigilweaver/OpenWRaw#25).
+
 ## [1.2.7] - 2026-07-25
 
 ### Fixed
