@@ -17,7 +17,7 @@ categories = ["parser-implementations", "science"]
 
 [workspace.dependencies]
 openwraw = { path = "crates/openwraw" }
-openmassspec-core = "1.3.0"
+openmassspec-core = "1.4.0"
 pyo3 = { version = "0.29.0", features = ["extension-module"] }
 
 [workspace.lints.rust]

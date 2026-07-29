@@ -176,6 +176,8 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         instrument_serial_number: None,
         software_name: SOFTWARE_NAME.into(),
         software_version: SOFTWARE_VERSION.into(),
+        acquisition_software_name: None,
+        acquisition_software_version: None,
         start_timestamp,
         mobility_array_kind: Some(msc::MobilityArrayKind::DriftTimeMilliseconds),
         analyzers: Vec::new(),
