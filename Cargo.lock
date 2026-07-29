@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "openwraw"
-version = "1.2.7"
+version = "1.2.8"
 dependencies = [
  "openmassspec-core",
  "thiserror",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "openwraw-py"
-version = "1.2.7"
+version = "1.2.8"
 dependencies = [
  "openwraw",
  "pyo3",
