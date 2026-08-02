@@ -4,6 +4,12 @@
 //!
 //! Looks for a small Waters bundle from PXD058812; skips silently when
 //! absent so CI without the corpus is happy.
+//!
+//! In CI, `.github/workflows/ci.yml`'s `rust` job downloads and unzips
+//! the `ITEM_M11_7_His_tag_01.raw` bundle to the workspace root ahead of
+//! `cargo test` (Linux and macOS runners only), so this test exercises a
+//! real decode path there instead of skipping - see
+//! Sigilweaver/OpenWRaw#27.
 
 use std::path::PathBuf;
 
@@ -12,6 +18,11 @@ use openwraw::{mzml::collect_records, Reader};
 
 fn fixture() -> Option<PathBuf> {
     let candidates = [
+        // CI / repo-root (gitignored; populated by ci.yml's rust job).
+        // This is the one CI actually uses.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ITEM_M11_7_His_tag_01.raw"),
+        // Local dev setups that have a sibling SpecLance checkout with
+        // the full corpus available.
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../SpecLance/corpus/waters/PXD058812/molecular_mass_P15_01.raw"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

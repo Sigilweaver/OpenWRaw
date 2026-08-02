@@ -14,7 +14,8 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   # Small public Waters MassLynx .raw bundle (~5 MB zipped) from PRIDE
-  # PXD058812, used for the mzML schema-validation job. Waters .raw is a
+  # PXD058812, used by the rust job's conformance test, the python job's
+  # pytest suite, and the mzML schema-validation job. Waters .raw is a
   # directory bundle, distributed on PRIDE as a .raw.zip.
   WATERS_ZIP_URL: >-
     https://ftp.pride.ebi.ac.uk/pride/data/archive/2025/05/PXD058812/ITEM_M11_7_His_tag_01.raw.zip
@@ -47,6 +48,13 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Download and unzip Waters sample
+        if: runner.os != 'Windows'
+        run: |
+          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          unzip -q waters.raw.zip
+          test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
 
       - name: cargo test
         run: cargo test --workspace

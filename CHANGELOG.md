@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI's `rust` job now downloads and unzips the same small PRIDE
+  PXD058812 Waters bundle the `python` and `validate-mzml` jobs already
+  use (Linux and macOS runners), ahead of `cargo test`, so
+  `crates/openwraw/tests/conformance.rs` exercises a real decode path
+  in CI instead of always skipping (Sigilweaver/OpenWRaw#27).
+
 ## [1.2.8] - 2026-07-29
 
 ### Fixed

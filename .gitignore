@@ -26,6 +26,11 @@ tests/.cache/
 corpus/PXD*/
 corpus/index.csv
 
+# CI/local-dev download target for the conformance-test Waters fixture
+# (see .github/workflows/ci.yml and crates/openwraw/tests/conformance.rs)
+/waters.raw.zip
+/ITEM_M11_7_His_tag_01.raw/
+
 # ── Docusaurus ───────────────────────────────────────────────────────────────
 docs/node_modules/
 docs/build/
