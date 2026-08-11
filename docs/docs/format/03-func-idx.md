@@ -37,6 +37,15 @@ The lower 16 bits equal the number of 6-byte records in the paired .DAT scan (co
 196/196 non-final scans in PXD058812). For blank scans (scan 0-2), n_records = 2.
 The upper 16 bits are always 0x1800 (= 6144), serving as an encoding type marker.
 
+The `peak_count` field is retained as decoded metadata but is not a valid
+assertion on the length returned by the current Encoding A decoder. In the
+corpus, a scan can contain thousands of non-zero 6-byte DAT records while the
+IDX field reports only tens or hundreds of centroid peaks (for example, 3,253
+records and 47 peaks). The decoder emits the former after removing sentinel
+and zero-intensity records; using `peak_count` as a sanity check would therefore
+reject valid corpus scans unless the unimplemented centroid relationship is
+first established (Sigilweaver/OpenWRaw#24).
+
 This means `n_records = u32@0x04 & 0xFFFF` gives an alternative way to read the scan's
 record count without computing the difference between consecutive DAT offsets.
 

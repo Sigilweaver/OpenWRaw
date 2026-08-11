@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use (Linux and macOS runners), ahead of `cargo test`, so
   `crates/openwraw/tests/conformance.rs` exercises a real decode path
   in CI instead of always skipping (Sigilweaver/OpenWRaw#27).
+- Documented why the decoded ETD mode, lock-mass correction, extern mass
+  range, chromatogram source type, and IDX centroid-count fields cannot yet
+  be applied to spectrum/chromatogram output without non-zero fixtures or a
+  confirmed model/invariant (Sigilweaver/OpenWRaw#22, #23, #24).
 
 ## [1.2.8] - 2026-07-29
 

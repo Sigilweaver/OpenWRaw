@@ -124,6 +124,17 @@ and `mzml::precursor_info_for` uses it to populate
 (which has no discrete precursor `target_mz` but still reports a real
 per-scan collision energy) and targeted MS/MS (Sigilweaver/OpenWRaw#8, #13).
 
+Channels 101, 102, and 121 remain available through the generic `channel` /
+`value_at` API but are deliberately not applied downstream. Every sample in
+the repository corpus has `Use lock mass correction = 0`,
+`Lock mass correction = 0.0`, and (where present)
+`ETD Fragmentation Mode = 0`. Consequently the corpus cannot establish how a
+non-zero lock-mass value modifies the calibrated TOF-to-m/z conversion, or
+verify that a non-zero fragmentation-mode value should be emitted as ETD.
+Applying either interpretation would require a fixture with a non-zero value
+and an independently checkable in-repository invariant (Sigilweaver/OpenWRaw#22,
+#23).
+
 ## Reference Sources
 
 - Empirical analysis: all `_FUNC001.STS` files in corpus
