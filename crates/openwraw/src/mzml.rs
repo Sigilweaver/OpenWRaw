@@ -169,6 +169,7 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         .zip(reader.header.acquired_time.as_deref())
         .and_then(|(d, t)| parse_acquired_datetime(d, t));
     msc::RunMetadata {
+        extra: ::std::collections::BTreeMap::new(),
         source_file_name: reader.bundle_name.clone(),
         source_file_format: source_file_format_cv(),
         native_id_format: native_id_format_cv(),
@@ -390,6 +391,8 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
     let ms_level = ms_level_for_function(reader, function_index);
     let precursor = precursor_info_for(reader, function_index, ms_level, collision_energy_ev);
     msc::SpectrumRecord {
+        extra: ::std::collections::BTreeMap::new(),
+        acquisition_event_id: None,
         index: (scan_counter as usize).saturating_sub(1),
         scan_number: scan_counter,
         native_id: native_id_for(function_index, scan_idx),
