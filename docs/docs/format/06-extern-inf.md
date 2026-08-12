@@ -153,6 +153,14 @@ field `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
 functions (both targeted and MSe) comes from a separate file - see
 [07 - _FUNCnnn.STS](07-func-sts.md)'s "Collision Energy" channel.
 
+`ExternFunction::start_mass_da` and `end_mass_da` preserve the text fields
+decoded from this file, but spectrum decoding continues to use
+`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high`. The corpus and current
+output model do not establish whether the two pairs are aliases, bounds with
+different meanings, or which source should take precedence when they differ,
+so the extern values are not substituted into the decode path
+(Sigilweaver/OpenWRaw#24).
+
 ## Version Line
 
 `Created by <version_string>` gives the MassLynx version that wrote the file:

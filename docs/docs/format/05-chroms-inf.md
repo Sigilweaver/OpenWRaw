@@ -96,6 +96,13 @@ Note: BSM channel names are prefixed with 0xB5 (`µ` in Windows-1252) in the raw
 The lo/hi fields in `$CC$` are 0,0 in all observed samples (limits may not be stored here).
 Units encoding is Windows-1252: `°` is 0xB0, `µ` is 0xB5.
 
+`source_type` is preserved on `raw::chroms::ChromChannel` and exposed by the
+Python `RawReader.channels` API (with binding coverage). It is not copied into
+`openmassspec_core::ChromatogramRecord`, whose model has no source-device
+field; inventing a CV annotation or changing chromatogram selection based on
+the numeric device class would require a separately established mapping
+(Sigilweaver/OpenWRaw#24).
+
 ## Companion Chromatogram Files
 
 For each data record in `_CHROMS.INF` there is a corresponding `_CHROnnnn.DAT` file
