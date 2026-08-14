@@ -263,6 +263,7 @@ fn precursor_info_for(
     function_index: u32,
     ms_level: u32,
     collision_energy_ev: Option<f64>,
+    etd_fragmentation_mode: Option<f64>,
 ) -> Option<msc::PrecursorInfo> {
     if ms_level < 2 {
         return None;
@@ -279,7 +280,21 @@ fn precursor_info_for(
         target_mz,
         collision_energy: collision_energy_ev,
         ce_is_nce: false,
+        activation: activation_for(etd_fragmentation_mode),
         ..Default::default()
+    })
+}
+
+/// Map `_FUNCnnn.STS`'s "ETD Fragmentation Mode" channel (seq 121) to an
+/// `Activation` variant per `docs/docs/format/07-func-sts.md`: `0` is CID,
+/// non-zero is ETD. `None` when the channel isn't present in the STS file.
+fn activation_for(etd_fragmentation_mode: Option<f64>) -> Option<msc::Activation> {
+    etd_fragmentation_mode.map(|v| {
+        if v == 0.0 {
+            msc::Activation::CID
+        } else {
+            msc::Activation::ETD
+        }
     })
 }
 
@@ -379,6 +394,7 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
         retention_time_min,
         spectrum,
         collision_energy_ev,
+        etd_fragmentation_mode,
     } = scan;
     let (mz, intensity, mobility) = match spectrum {
         DecodedSpectrum::Plain(s) => (s.mz, s.intensity, None),
@@ -389,7 +405,13 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
     };
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
     let ms_level = ms_level_for_function(reader, function_index);
-    let precursor = precursor_info_for(reader, function_index, ms_level, collision_energy_ev);
+    let precursor = precursor_info_for(
+        reader,
+        function_index,
+        ms_level,
+        collision_energy_ev,
+        etd_fragmentation_mode,
+    );
     msc::SpectrumRecord {
         extra: ::std::collections::BTreeMap::new(),
         acquisition_event_id: None,
@@ -537,6 +559,18 @@ mod tests {
             assert_eq!(cv.accession, acc, "wrong accession for {name:?}");
             assert_eq!(cv.name, term_name, "wrong CV name for {name:?}");
         }
+    }
+
+    // Sigilweaver/OpenWRaw#22: no corpus fixture has a non-zero "ETD
+    // Fragmentation Mode" value, so the non-zero -> ETD branch can only be
+    // exercised synthetically here rather than against real acquisition
+    // data.
+    #[test]
+    fn activation_for_maps_zero_to_cid_and_nonzero_to_etd() {
+        assert_eq!(activation_for(Some(0.0)), Some(msc::Activation::CID));
+        assert_eq!(activation_for(Some(1.0)), Some(msc::Activation::ETD));
+        assert_eq!(activation_for(Some(-1.0)), Some(msc::Activation::ETD));
+        assert_eq!(activation_for(None), None);
     }
 
     #[test]

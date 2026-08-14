@@ -177,6 +177,13 @@ impl FuncSts {
         let desc = self.channel("Collision Energy")?;
         self.value_at(desc, scan_idx)
     }
+
+    /// Per-scan ETD Fragmentation Mode (seq 121), if this function's STS
+    /// file records that channel: `0` for CID, non-zero for ETD.
+    pub fn etd_fragmentation_mode(&self, scan_idx: usize) -> Option<f64> {
+        let desc = self.channel("ETD Fragmentation Mode")?;
+        self.value_at(desc, scan_idx)
+    }
 }
 
 #[cfg(test)]
@@ -228,6 +235,16 @@ mod tests {
 
         let sts = FuncSts::from_bytes(&bytes).unwrap();
         assert!((sts.collision_energy(0).unwrap() - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn etd_fragmentation_mode_convenience_accessor() {
+        let mut bytes = make_preamble(32 + 48, 2, 1);
+        bytes.extend(make_descriptor(121, 1, 0, "ETD Fragmentation Mode"));
+        bytes.extend(1i16.to_le_bytes());
+
+        let sts = FuncSts::from_bytes(&bytes).unwrap();
+        assert!((sts.etd_fragmentation_mode(0).unwrap() - 1.0).abs() < 1e-6);
     }
 
     #[test]

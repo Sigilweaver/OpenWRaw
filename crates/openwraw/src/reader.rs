@@ -190,12 +190,17 @@ impl Reader {
             .sts
             .as_ref()
             .and_then(|sts| sts.collision_energy(scan_idx));
+        let etd_fragmentation_mode = entry
+            .sts
+            .as_ref()
+            .and_then(|sts| sts.etd_fragmentation_mode(scan_idx));
         Ok(DecodedScan {
             function_index,
             scan_idx,
             retention_time_min: rt_min,
             spectrum: decoded,
             collision_energy_ev,
+            etd_fragmentation_mode,
         })
     }
 
@@ -224,6 +229,10 @@ pub struct DecodedScan {
     /// Per-scan collision energy (eV) from `_FUNCnnn.STS`'s "Collision
     /// Energy" channel, when the file is present and defines that channel.
     pub collision_energy_ev: Option<f64>,
+    /// Per-scan ETD Fragmentation Mode from `_FUNCnnn.STS`'s "ETD
+    /// Fragmentation Mode" channel (seq 121): `0` for CID, non-zero for
+    /// ETD, `None` when the file is absent or doesn't define the channel.
+    pub etd_fragmentation_mode: Option<f64>,
 }
 
 /// Decoded payload of a scan; varies by encoding.
