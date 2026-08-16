@@ -27,6 +27,31 @@ use crate::raw::functions_inf::{FunctionInfo, FunctionTable};
 use crate::raw::header::{FunctionCal, Header};
 use crate::raw::index::ScanIndex;
 
+/// Sanity-check a Variant A scan's declared centroid `peak_count` (`_FUNCnnn.IDX`
+/// +0x10) against the number of peaks the decoder actually emitted.
+///
+/// `peak_count` is a MassLynx-computed centroid count, while
+/// [`decode_encoding_a`] instead emits every non-sentinel, non-zero-intensity
+/// 6-byte record - profile-mode oversampling means several raw records can
+/// fold into a single centroid, so a centroid count can never exceed the
+/// decoded record count (`docs/format/03-func-idx.md`'s Field +0x10 note
+/// documents a corpus scan with 3,253 decoded records and a `peak_count` of
+/// 47). Equality does not hold and isn't asserted; this only catches a
+/// decode that produced implausibly *few* points for the peak count the
+/// index claims.
+fn check_peak_count_sanity(
+    function_index: u32,
+    scan_idx: usize,
+    peak_count: u16,
+    decoded_len: usize,
+) {
+    debug_assert!(
+        peak_count as usize <= decoded_len,
+        "function {function_index} scan {scan_idx}: _FUNCnnn.IDX peak_count \
+         {peak_count} exceeds decoded peak count {decoded_len}"
+    );
+}
+
 /// Which decoder applies to a given function's `_FUNCnnn.DAT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
@@ -186,6 +211,18 @@ impl Reader {
             Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
             Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
         };
+        if let (ScanIndex::A(records), DecodedSpectrum::Plain(spectrum)) =
+            (&entry.scan_index, &decoded)
+        {
+            if let Some(rec) = records.get(scan_idx) {
+                check_peak_count_sanity(
+                    function_index,
+                    scan_idx,
+                    rec.peak_count,
+                    spectrum.mz.len(),
+                );
+            }
+        }
         let collision_energy_ev = entry
             .sts
             .as_ref()
@@ -434,5 +471,30 @@ mod tests {
         );
         let (_, length, _) = scan_slice(&entry, 0).unwrap();
         assert_eq!(length, 30);
+    }
+
+    // -- check_peak_count_sanity --
+
+    #[test]
+    fn peak_count_sanity_passes_at_the_documented_corpus_ratio() {
+        // docs/format/03-func-idx.md: PXD058812 scan with 3,253 decoded
+        // records and a `peak_count` of 47.
+        check_peak_count_sanity(1, 0, 47, 3253);
+    }
+
+    #[test]
+    fn peak_count_sanity_passes_when_equal() {
+        check_peak_count_sanity(1, 0, 10, 10);
+    }
+
+    #[test]
+    fn peak_count_sanity_passes_for_blank_scan() {
+        check_peak_count_sanity(1, 0, 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds decoded peak count")]
+    fn peak_count_sanity_panics_when_peak_count_exceeds_decoded_len() {
+        check_peak_count_sanity(1, 0, 100, 5);
     }
 }

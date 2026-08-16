@@ -77,10 +77,6 @@ impl FunctionMode {
 pub struct ExternFunction {
     /// 1-based function index.
     pub index: u32,
-    /// Acquisition m/z lower limit (Da).
-    pub start_mass_da: f64,
-    /// Acquisition m/z upper limit (Da).
-    pub end_mass_da: f64,
     /// Per-function pusher interval override (us) from `ADC Pusher Frequency`.
     /// `None` when not present; fall back to `ExternInf::pusher_interval_us`.
     pub pusher_interval_us: Option<f64>,
@@ -181,8 +177,6 @@ impl std::str::FromStr for ExternInf {
                     let mode = FunctionMode::from_section_tail(tail);
                     functions.entry(n).or_insert(ExternFunction {
                         index: n,
-                        start_mass_da: 0.0,
-                        end_mass_da: 0.0,
                         pusher_interval_us: None,
                         mode,
                         set_mass_da: None,
@@ -234,20 +228,6 @@ impl std::str::FromStr for ExternInf {
                     if let Ok(v) = value_str.parse::<f64>() {
                         if value_str != "Automatic" {
                             pusher_from_cycle.get_or_insert(v);
-                        }
-                    }
-                }
-                "Start Mass" => {
-                    if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
-                        if let Some(f) = functions.get_mut(&n) {
-                            f.start_mass_da = v;
-                        }
-                    }
-                }
-                "End Mass" => {
-                    if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
-                        if let Some(f) = functions.get_mut(&n) {
-                            f.end_mass_da = v;
                         }
                     }
                 }
@@ -390,11 +370,9 @@ End Mass                                       2000.0\r\n\
     }
 
     #[test]
-    fn parse_function_mass_range() {
+    fn parse_function_has_no_pusher_override_by_default() {
         let ext: ExternInf = EXTERN_PXD058812.parse().unwrap();
         let f1 = ext.functions.get(&1).expect("Function 1 missing");
-        assert!((f1.start_mass_da - 100.0).abs() < 1e-6);
-        assert!((f1.end_mass_da - 2000.0).abs() < 1e-6);
         assert!(f1.pusher_interval_us.is_none());
     }
 

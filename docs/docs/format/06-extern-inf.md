@@ -134,8 +134,8 @@ Key per-function fields:
 
 | Field | Units | Description |
 |-------|-------|-------------|
-| `Start Mass` | Da | Acquisition m/z lower limit |
-| `End Mass` | Da | Acquisition m/z upper limit |
+| `Start Mass` | Da | Acquisition m/z lower limit. Not parsed into a struct field - see note below |
+| `End Mass` | Da | Acquisition m/z upper limit (MSMS/DAUGHTER sections instead use `MSMS End Mass`, which is not recognised by the parser either). Not parsed into a struct field - see note below |
 | `Start Time (mins)` | min | Acquisition start retention time |
 | `End Time (mins)` | min | Acquisition end retention time |
 | `Scan Time (sec)` | s | Duration of one scan |
@@ -153,13 +153,19 @@ field `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
 functions (both targeted and MSe) comes from a separate file - see
 [07 - _FUNCnnn.STS](07-func-sts.md)'s "Collision Energy" channel.
 
-`ExternFunction::start_mass_da` and `end_mass_da` preserve the text fields
-decoded from this file, but spectrum decoding continues to use
-`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high`. The corpus and current
-output model do not establish whether the two pairs are aliases, bounds with
-different meanings, or which source should take precedence when they differ,
-so the extern values are not substituted into the decode path
-(Sigilweaver/OpenWRaw#24).
+`Start Mass` / `End Mass` were previously decoded into
+`ExternFunction::start_mass_da` / `end_mass_da`, but the field was never read
+anywhere outside its own module's tests - spectrum decoding has always used
+`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high` exclusively, and the
+corpus never established whether the two pairs are aliases, bounds with
+different meanings, or which source should take precedence when they differ.
+The `_extern.inf` parser also never handled the `MSMS End Mass` key that
+`TOF MSMS FUNCTION` sections use instead of `End Mass` (see
+`crates/openwraw/src/raw/extern_inf.rs`'s `EXTERN_PXD035818_MSMS` test
+fixture), so `end_mass_da` silently stayed `0.0` for every targeted-MS/MS
+function - not a reliable value to promote to a decode cross-check. Given
+both the missing consumer and the parsing gap, the fields were removed
+rather than wired in (Sigilweaver/OpenWRaw#24).
 
 ## Version Line
 

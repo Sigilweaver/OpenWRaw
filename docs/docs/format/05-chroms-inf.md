@@ -96,12 +96,17 @@ Note: BSM channel names are prefixed with 0xB5 (`µ` in Windows-1252) in the raw
 The lo/hi fields in `$CC$` are 0,0 in all observed samples (limits may not be stored here).
 Units encoding is Windows-1252: `°` is 0xB0, `µ` is 0xB5.
 
-`source_type` is preserved on `raw::chroms::ChromChannel` and exposed by the
-Python `RawReader.channels` API (with binding coverage). It is not copied into
-`openmassspec_core::ChromatogramRecord`, whose model has no source-device
-field; inventing a CV annotation or changing chromatogram selection based on
-the numeric device class would require a separately established mapping
-(Sigilweaver/OpenWRaw#24).
+`source_type` is kept on `raw::chroms::ChromChannel` and exposed by the
+Python `RawReader.channels` API (with binding coverage), so callers can
+already filter or label BSM-pump vs. column/sample channels themselves. It is
+deliberately not copied into `openmassspec_core::ChromatogramRecord`:
+that model has no source-device field, and every channel already carries a
+human-readable `name` that spells out its device (`"BSM ..."` vs.
+`"(1) ..."`), so a numeric field would duplicate information the mzML
+consumer can already get from the name. Inventing a CV annotation or
+changing chromatogram selection based on the numeric device class would
+still need a separately established PSI-MS mapping, which the corpus doesn't
+motivate (Sigilweaver/OpenWRaw#24).
 
 ## Companion Chromatogram Files
 
