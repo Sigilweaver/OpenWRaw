@@ -37,14 +37,21 @@ The lower 16 bits equal the number of 6-byte records in the paired .DAT scan (co
 196/196 non-final scans in PXD058812). For blank scans (scan 0-2), n_records = 2.
 The upper 16 bits are always 0x1800 (= 6144), serving as an encoding type marker.
 
-The `peak_count` field is retained as decoded metadata but is not a valid
-assertion on the length returned by the current Encoding A decoder. In the
-corpus, a scan can contain thousands of non-zero 6-byte DAT records while the
-IDX field reports only tens or hundreds of centroid peaks (for example, 3,253
-records and 47 peaks). The decoder emits the former after removing sentinel
-and zero-intensity records; using `peak_count` as a sanity check would therefore
-reject valid corpus scans unless the unimplemented centroid relationship is
-first established (Sigilweaver/OpenWRaw#24).
+`peak_count` cannot be asserted for *equality* against the length returned by
+the current Encoding A decoder. In the corpus, a scan can contain thousands
+of non-zero 6-byte DAT records while the IDX field reports only tens or
+hundreds of centroid peaks (for example, 3,253 records and 47 peaks). The
+decoder emits the former after removing sentinel and zero-intensity records;
+it does not centroid, so its output count and `peak_count` measure different
+things and an equality check would reject valid corpus scans.
+
+What does hold, and is what `Reader::decode_scan` checks (as a
+`debug_assert!`, `check_peak_count_sanity` in `reader.rs`): a centroid count
+can never exceed the raw decoded record count, since every centroid is built
+from at least one raw point. `peak_count <= decoded_len` is therefore a cheap
+decode sanity check - it catches a decode that produced implausibly few
+points for the peak count the index claims - without depending on the
+unimplemented centroiding relationship (Sigilweaver/OpenWRaw#24).
 
 This means `n_records = u32@0x04 & 0xFFFF` gives an alternative way to read the scan's
 record count without computing the difference between consecutive DAT offsets.
