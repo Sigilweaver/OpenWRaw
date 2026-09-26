@@ -1,7 +1,6 @@
 // Parser for _extern.inf - the ASCII instrument parameter file present in
 // every Waters .raw directory.  Provides the geometry constants (Lteff, Veff)
-// and pusher timing (PusherInterval / Pusher Cycle Time) required to convert
-// stored TOF bin indices into calibrated flight times and then into m/z values.
+// and optional pusher timing (PusherInterval / Pusher Cycle Time).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -109,7 +108,7 @@ pub struct ExternInf {
     ///
     /// Sourced from `PusherInterval` (newer instruments) or
     /// `Pusher Cycle Time` (older instruments; "Automatic" is ignored).
-    pub pusher_interval_us: f64,
+    pub pusher_interval_us: Option<f64>,
     /// Electrospray polarity, parsed from the `Polarity` field.
     /// `None` when the field is absent or unparseable.
     pub polarity: Option<Polarity>,
@@ -140,11 +139,11 @@ impl ExternInf {
     ///
     /// Uses the per-function `ADC Pusher Frequency` override when present,
     /// otherwise returns the global `pusher_interval_us`.
-    pub fn pusher_interval_for(&self, func: u32) -> f64 {
+    pub fn pusher_interval_for(&self, func: u32) -> Option<f64> {
         self.functions
             .get(&func)
             .and_then(|f| f.pusher_interval_us)
-            .unwrap_or(self.pusher_interval_us)
+            .or(self.pusher_interval_us)
     }
 }
 
@@ -224,7 +223,7 @@ impl std::str::FromStr for ExternInf {
                         veff_v.get_or_insert(v);
                     }
                 }
-                "PusherInterval" => {
+                "PusherInterval" | "Pusher Interval" => {
                     if let Ok(v) = value_str.parse::<f64>() {
                         pusher_from_interval.get_or_insert(v);
                     }
@@ -283,11 +282,9 @@ impl std::str::FromStr for ExternInf {
         let veff_v = veff_v
             .ok_or_else(|| crate::Error::Parse("_extern.inf: Veff field not found".to_owned()))?;
         // Prefer the dedicated PusherInterval field; fall back to Pusher Cycle Time.
-        let pusher_interval_us = pusher_from_interval.or(pusher_from_cycle).ok_or_else(|| {
-            crate::Error::Parse(
-                "_extern.inf: neither PusherInterval nor Pusher Cycle Time found".to_owned(),
-            )
-        })?;
+        // This field is absent in UNIFI exports and is not needed by the
+        // current DAT decoders. Preserve absence instead of inventing a value.
+        let pusher_interval_us = pusher_from_interval.or(pusher_from_cycle);
 
         Ok(ExternInf {
             lteff_mm,
@@ -370,7 +367,7 @@ End Mass                                       2000.0\r\n\
         let ext: ExternInf = EXTERN_PXD058812.parse().unwrap();
         assert!((ext.lteff_mm - 1997.94).abs() < 1e-3);
         assert!((ext.veff_v - 9100.0).abs() < 1e-3);
-        assert!((ext.pusher_interval_us - 62.0).abs() < 1e-6);
+        assert!((ext.pusher_interval_us.unwrap() - 62.0).abs() < 1e-6);
     }
 
     #[test]
@@ -378,7 +375,23 @@ End Mass                                       2000.0\r\n\
         let ext: ExternInf = EXTERN_PXD075602.parse().unwrap();
         assert!((ext.lteff_mm - 1800.0).abs() < 1e-3);
         assert!((ext.veff_v - 6328.24).abs() < 1e-3);
-        assert!((ext.pusher_interval_us - 60.25).abs() < 1e-6);
+        assert!((ext.pusher_interval_us.unwrap() - 60.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_spaced_pusher_interval() {
+        let ext: ExternInf = "Lteff 1400\nVeff 5525.90\nPusher Interval (µS) 64"
+            .parse()
+            .unwrap();
+        assert_eq!(ext.pusher_interval_us, Some(64.0));
+    }
+
+    #[test]
+    fn missing_pusher_timing_is_preserved() {
+        let ext: ExternInf = "Lteff 2200\nVeff 5227.617508"
+            .parse()
+            .unwrap();
+        assert_eq!(ext.pusher_interval_for(1), None);
     }
 
     #[test]
@@ -386,7 +399,7 @@ End Mass                                       2000.0\r\n\
         let ext: ExternInf = EXTERN_PXD068881.parse().unwrap();
         assert!((ext.lteff_mm - 1800.0).abs() < 1e-3);
         assert!((ext.veff_v - 7198.65).abs() < 1e-3);
-        assert!((ext.pusher_interval_us - 69.0).abs() < 1e-6);
+        assert!((ext.pusher_interval_us.unwrap() - 69.0).abs() < 1e-6);
     }
 
     #[test]
@@ -416,14 +429,14 @@ End Mass                                       2000.0\r\n\
     fn pusher_interval_for_falls_back_to_global() {
         let ext: ExternInf = EXTERN_PXD068881.parse().unwrap();
         // No per-function override -> global value returned.
-        assert!((ext.pusher_interval_for(1) - 69.0).abs() < 1e-6);
+        assert!((ext.pusher_interval_for(1).unwrap() - 69.0).abs() < 1e-6);
     }
 
     #[test]
     fn pusher_interval_for_uses_per_function_override() {
         let ext: ExternInf = EXTERN_PXD075602.parse().unwrap();
         // Per-function ADC Pusher Frequency = 60.3, global = 60.25.
-        assert!((ext.pusher_interval_for(1) - 60.3).abs() < 1e-6);
+        assert!((ext.pusher_interval_for(1).unwrap() - 60.3).abs() < 1e-6);
     }
 
     #[test]
@@ -526,9 +539,9 @@ MSMS End Mass\t2000.0\r\n\
     }
 
     #[test]
-    fn missing_pusher_is_error() {
+    fn missing_pusher_is_optional() {
         let src = "Lteff  1997.94\r\nVeff  9100.0\r\n";
-        let err = src.parse::<ExternInf>().unwrap_err();
-        assert!(err.to_string().contains("PusherInterval"));
+        let ext = src.parse::<ExternInf>().unwrap();
+        assert_eq!(ext.pusher_interval_us, None);
     }
 }
