@@ -86,6 +86,9 @@ bundle. It exits with an error if any bundle fails to open or any scan fails
 to decode. This checks decoder execution; independent mass-accuracy
 validation requires reference spectra.
 
+The [2026-09-26 corpus audit](CORPUS-AUDIT.md) records the expanded
+corpus results and the format gaps it exposed.
+
 ## Repository layout
 
 ```
