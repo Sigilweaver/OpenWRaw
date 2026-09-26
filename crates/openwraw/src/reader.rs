@@ -97,9 +97,9 @@ impl Reader {
     /// Open a `.raw/` bundle directory and parse every required side file.
     pub fn open<P: AsRef<Path>>(dir: P) -> crate::Result<Self> {
         let dir = dir.as_ref().to_path_buf();
-        let header = Header::from_path(&dir.join("_HEADER.TXT"))?;
-        let extern_inf = ExternInf::from_path(&dir.join("_extern.inf"))?;
-        let func_table = FunctionTable::from_path(&dir.join("_FUNCTNS.INF"))?;
+        let header = Header::from_path(&required_file(&dir, "_HEADER.TXT")?)?;
+        let extern_inf = ExternInf::from_path(&required_file(&dir, "_extern.inf")?)?;
+        let func_table = FunctionTable::from_path(&required_file(&dir, "_FUNCTNS.INF")?)?;
 
         let instrument = header.instrument.clone().unwrap_or_default();
         let is_synapt = instrument.to_ascii_uppercase().starts_with("SYNAPT");
@@ -108,11 +108,11 @@ impl Reader {
         for info in &func_table.functions {
             let idx_name = format!("_FUNC{:03}.IDX", info.index);
             let dat_name = format!("_FUNC{:03}.DAT", info.index);
-            let idx_path = dir.join(&idx_name);
-            let dat_path = dir.join(&dat_name);
-            if !idx_path.exists() || !dat_path.exists() {
+            let (Some(idx_path), Some(dat_path)) =
+                (find_file(&dir, &idx_name)?, find_file(&dir, &dat_name)?)
+            else {
                 continue;
-            }
+            };
             let scan_index = ScanIndex::from_path(&idx_path)?;
             let dat_size = fs::metadata(&dat_path)?.len();
             let encoding = match &scan_index {
@@ -131,8 +131,8 @@ impl Reader {
                 .cloned()
                 .unwrap_or_default();
 
-            let sts_path = dir.join(format!("_FUNC{:03}.STS", info.index));
-            let sts = FuncSts::from_path(&sts_path).ok();
+            let sts = find_file(&dir, &format!("_FUNC{:03}.STS", info.index))?
+                .and_then(|path| FuncSts::from_path(&path).ok());
 
             functions.push(FunctionEntry {
                 index: info.index,
@@ -211,6 +211,39 @@ impl Reader {
         plan.into_iter()
             .map(move |(fi, si)| self.decode_scan(fi, si))
     }
+}
+
+/// MassLynx exports may lowercase names or prefix every side file with a
+/// sample identifier. Prefer an exact case-insensitive name before a suffix.
+fn find_file(dir: &Path, name: &str) -> crate::Result<Option<PathBuf>> {
+    let wanted = name.to_ascii_uppercase();
+    let mut suffix = None;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let actual = entry.file_name().to_string_lossy().to_ascii_uppercase();
+        if actual == wanted {
+            return Ok(Some(entry.path()));
+        }
+        if actual.ends_with(&wanted) {
+            if suffix.is_some() {
+                return Err(crate::Error::Parse(format!(
+                    "multiple files match {name} in {}",
+                    dir.display()
+                )));
+            }
+            suffix = Some(entry.path());
+        }
+    }
+    Ok(suffix)
+}
+
+fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
+    find_file(dir, name)?.ok_or_else(|| {
+        crate::Error::Parse(format!("required file {name} missing in {}", dir.display()))
+    })
 }
 
 /// One scan after decoding.
