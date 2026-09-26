@@ -42,118 +42,50 @@ pub struct ImsSpectrum {
 
 // -- Encoding A --
 
-/// Byte marker for an Encoding A sentinel record.
-const ENC_A_SENTINEL: u8 = 0x70;
-
-fn is_enc_a_sentinel(marker: u8) -> bool {
-    marker == 0x60 || marker == ENC_A_SENTINEL
+/// Uncalibrated m/z stored in bytes 2-5 of an Encoding A record.
+///
+/// Byte 2 carries a 4-bit exponent in its high nibble (low nibble zero);
+/// bytes 3-5 are a normalized 24-bit mantissa with bit 23 set, so
+/// `m/z = mantissa * 2^(exponent - 24)`. The first and last records of a
+/// scan decode exactly to the acquisition mass range in `_FUNCTNS.INF`.
+fn encoding_a_mz(rec: &[u8]) -> crate::Result<f64> {
+    let mantissa = u32::from_le_bytes([rec[3], rec[4], rec[5], 0]);
+    if rec[2] & 0x0f != 0 || mantissa & 0x80_0000 == 0 {
+        return Err(crate::Error::Parse(format!(
+            "Encoding A: unsupported m/z word {:02x} {:02x} {:02x} {:02x}",
+            rec[2], rec[3], rec[4], rec[5]
+        )));
+    }
+    Ok(f64::from(mantissa) * 2f64.powi(i32::from(rec[2] >> 4) - 24))
 }
 
 /// Decode one scan slice from an Encoding A `_FUNCnnn.DAT` file.
 ///
 /// `scan_bytes` must be the exact bytes of one scan as given by the paired
-/// `_FUNCnnn.IDX` Variant A record (offset, n_records × 6).
-///
-/// Older scans begin with a 0x60 or 0x70 sentinel that encodes the TOF scale.
-/// Later QTof scans use marker pages and first/last mass-range anchors.
+/// `_FUNCnnn.IDX` Variant A record. Each 6-byte record is a u16 LE ion count
+/// followed by a floating-point m/z word (see [`encoding_a_mz`]). Zero-count
+/// records, including those marking the ends of the mass range, are skipped.
+/// The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z).
 pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
-    if scan_bytes.is_empty() {
-        return Ok(Spectrum::default());
-    }
     if scan_bytes.len() % 6 != 0 {
         return Err(crate::Error::Parse(format!(
             "Encoding A: scan size {} is not a multiple of 6",
             scan_bytes.len()
         )));
     }
-
     let n = scan_bytes.len() / 6;
-
-    // Later QTof acquisitions omit the 0x70 sentinel. Their block marker
-    // extends the TOF bin across 32,768-bin pages; the first and last records
-    // anchor the declared mass range, as in the eight-byte format.
-    if !is_enc_a_sentinel(scan_bytes[2]) {
-        return decode_encoding_a_unanchored(scan_bytes, params);
-    }
-    let sentinel_tof_bin = read_u16_le(scan_bytes, 4)? as f64;
-    if sentinel_tof_bin == 0.0 {
-        return Err(crate::Error::Parse(
-            "Encoding A: sentinel_tof_bin is zero".to_owned(),
-        ));
-    }
-
-    // t_bin_us: µs per TOF bin for this scan.
-    // A_us * sqrt(mz_high) gives the expected flight time at mz_high; that
-    // flight time corresponds to sentinel_tof_bin bins.
-    let t_bin_us = params.a_us * params.mz_high.sqrt() / sentinel_tof_bin;
-
-    let mut out = Spectrum {
-        mz: Vec::with_capacity(n.saturating_sub(1)),
-        intensity: Vec::with_capacity(n.saturating_sub(1)),
-    };
-
-    for i in 1..n {
-        let rec = &scan_bytes[i * 6..(i + 1) * 6];
-        let block_type = rec[2];
-        let raw_intensity = rec[3];
-        let tof_bin = read_u16_le(rec, 4)? as f64;
-
-        if is_enc_a_sentinel(block_type) || raw_intensity == 0 {
-            continue;
-        }
-
-        let t_raw = tof_bin * t_bin_us;
-        let t_cal = params.cal.apply(t_raw);
-        out.mz.push((t_cal / params.a_us).powi(2));
-        out.intensity.push(raw_intensity as f32);
-    }
-
-    Ok(out)
-}
-
-fn encoding_a_full_bin(rec: &[u8]) -> crate::Result<f64> {
-    let marker = rec[2];
-    if !(0x80..=0xb0).contains(&marker) || marker & 0x0f != 0 {
-        return Err(crate::Error::Parse(format!(
-            "Encoding A: unsupported record marker {marker:#04x}"
-        )));
-    }
-    let page = (i32::from(marker) - 0x90) / 0x10;
-    Ok(f64::from(read_u16_le(rec, 4)?) + f64::from(page * 32768))
-}
-
-fn decode_encoding_a_unanchored(
-    scan_bytes: &[u8],
-    params: &DecodeParams,
-) -> crate::Result<Spectrum> {
-    let n = scan_bytes.len() / 6;
-    if n < 2 {
-        return Ok(Spectrum::default());
-    }
-    let bin_low = encoding_a_full_bin(&scan_bytes[..6])?;
-    let bin_high = encoding_a_full_bin(&scan_bytes[(n - 1) * 6..])?;
-    if bin_high <= bin_low {
-        return Err(crate::Error::Parse(format!(
-            "Encoding A: non-increasing TOF anchors {bin_low} and {bin_high}"
-        )));
-    }
-    let t_low = params.a_us * params.mz_low.sqrt();
-    let t_high = params.a_us * params.mz_high.sqrt();
-    let t_bin = (t_high - t_low) / (bin_high - bin_low);
     let mut out = Spectrum {
         mz: Vec::with_capacity(n),
         intensity: Vec::with_capacity(n),
     };
     for rec in scan_bytes.chunks_exact(6) {
-        let intensity = rec[3];
-        if intensity == 0 {
+        let count = u16::from_le_bytes([rec[0], rec[1]]);
+        if count == 0 {
             continue;
         }
-        let bin = encoding_a_full_bin(rec)?;
-        let t_raw = t_low + (bin - bin_low) * t_bin;
-        let t_cal = params.cal.apply(t_raw);
-        out.mz.push((t_cal / params.a_us).powi(2));
-        out.intensity.push(f32::from(intensity));
+        let mz = encoding_a_mz(rec)?;
+        out.mz.push(params.cal.apply(mz.sqrt()).powi(2));
+        out.intensity.push(f32::from(count));
     }
     Ok(out)
 }
@@ -288,6 +220,59 @@ pub fn decode_encoding_c(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
+// -- Encoding D --
+
+/// Bit 26 of the Encoding D position word is always set: the mantissa
+/// carries an explicit leading one below a 5-bit exponent.
+const ENC_D_LEADING_ONE: u32 = 1 << 26;
+
+/// Uncalibrated m/z stored in an Encoding D position word (bytes 4-7).
+///
+/// `m/z = 2^(u >> 27) * (u & 0x07FF_FFFF) / 2^27`. Consecutive records in a
+/// profile step by one ADC sample, which matches the flight-time model from
+/// `Lteff`, `Veff` and the ADC sample frequency across the mass range.
+fn encoding_d_mz(u: u32) -> crate::Result<f64> {
+    if u & ENC_D_LEADING_ONE == 0 {
+        return Err(crate::Error::Parse(format!(
+            "Encoding D: position word {u:#010x} lacks the leading mantissa bit"
+        )));
+    }
+    let exponent = (u >> 27) as i32;
+    let mantissa = f64::from(u & 0x07FF_FFFF) / f64::from(1u32 << 27);
+    Ok(mantissa * 2f64.powi(exponent))
+}
+
+/// Decode one scan slice from an Encoding D `_FUNCnnn.DAT` file.
+///
+/// Encoding D pairs a 22-byte Variant A index with 8-byte records:
+/// bytes 0-3 are intensity as unsigned 16.16 fixed point and bytes 4-7 are
+/// a floating-point m/z word (see [`encoding_d_mz`]). The `_HEADER.TXT`
+/// T1 polynomial applies to sqrt(m/z), which is proportional to flight time.
+pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
+    if scan_bytes.len() % 8 != 0 {
+        return Err(crate::Error::Parse(format!(
+            "Encoding D: scan size {} is not a multiple of 8",
+            scan_bytes.len()
+        )));
+    }
+    let n = scan_bytes.len() / 8;
+    let mut out = Spectrum {
+        mz: Vec::with_capacity(n),
+        intensity: Vec::with_capacity(n),
+    };
+    for rec in scan_bytes.chunks_exact(8) {
+        let intensity = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
+        if intensity == 0 {
+            continue;
+        }
+        let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
+        let mz = encoding_d_mz(position)?;
+        out.mz.push(params.cal.apply(mz.sqrt()).powi(2));
+        out.intensity.push((f64::from(intensity) / 65536.0) as f32);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,18 +302,12 @@ mod tests {
 
     // -- Encoding A helpers --
 
-    fn enc_a_sentinel(sentinel_tof_bin: u16) -> [u8; 6] {
+    /// 6-byte record with `count` ions at `mantissa * 2^(exponent - 24)`.
+    fn enc_a_record(count: u16, exponent: u8, mantissa: u32) -> [u8; 6] {
         let mut r = [0u8; 6];
-        r[2] = ENC_A_SENTINEL;
-        r[4..6].copy_from_slice(&sentinel_tof_bin.to_le_bytes());
-        r
-    }
-
-    fn enc_a_data(block_type: u8, intensity: u8, tof_bin: u16) -> [u8; 6] {
-        let mut r = [0u8; 6];
-        r[2] = block_type;
-        r[3] = intensity;
-        r[4..6].copy_from_slice(&tof_bin.to_le_bytes());
+        r[0..2].copy_from_slice(&count.to_le_bytes());
+        r[2] = exponent << 4;
+        r[3..6].copy_from_slice(&mantissa.to_le_bytes()[..3]);
         r
     }
 
@@ -354,45 +333,85 @@ mod tests {
         recs.iter().flat_map(|r| r.iter().copied()).collect()
     }
 
+    // -- Encoding D tests --
+
+    fn enc_d_record(intensity: u32, position: u32) -> [u8; 8] {
+        let mut r = [0u8; 8];
+        r[0..4].copy_from_slice(&intensity.to_le_bytes());
+        r[4..8].copy_from_slice(&position.to_le_bytes());
+        r
+    }
+
+    #[test]
+    fn enc_d_position_word_is_floating_mz() {
+        // Exponent 10, mantissa 0.5 exactly -> 512.
+        assert_eq!(encoding_d_mz(0x5400_0000).unwrap(), 512.0);
+        // Word observed at the Leu-Enk apex of a public Vion reference scan.
+        let mz = encoding_d_mz(1_415_079_944).unwrap();
+        assert!((mz - 556.20319).abs() < 1e-5, "{mz}");
+        assert!(encoding_d_mz(0x5000_0000).is_err());
+    }
+
+    #[test]
+    fn enc_d_decodes_fixed_point_intensity_and_skips_zeros() {
+        let scan = bytes_of(&[
+            enc_d_record(0, 0x5400_0000),
+            enc_d_record((415 << 16) | 0x8000, 0x5400_0000),
+            enc_d_record(0, 0x5800_0000),
+        ]);
+        let spec = decode_encoding_d(&scan, &test_params()).unwrap();
+        assert_eq!(spec.mz.len(), 1);
+        assert!((spec.mz[0] - 512.0).abs() < 1e-9);
+        assert_eq!(spec.intensity, vec![415.5]);
+    }
+
+    #[test]
+    fn enc_d_applies_calibration_to_sqrt_mz() {
+        let mut params = test_params();
+        params.cal = FunctionCal {
+            coeffs: vec![0.0, 1.0001],
+            cal_type: CalType::T1,
+        };
+        let scan = bytes_of(&[enc_d_record(1 << 16, 0x5400_0000)]);
+        let spec = decode_encoding_d(&scan, &params).unwrap();
+        assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
+    }
+
     // -- Encoding A tests --
 
-    // With a_us=1.0, mz_high=100.0, sentinel_tof_bin=10000:
-    //   t_bin_us = 1.0 * 10.0 / 10000 = 0.001 µs/bin
-    //   tof_bin=6000 → t_raw=6.0 µs → mz=(6.0/1.0)^2=36.0 Da
     #[test]
-    fn enc_a_decodes_peak_mz() {
-        let scan = bytes_of(&[enc_a_sentinel(10000), enc_a_data(0x80, 42, 6000)]);
-        let spec = decode_encoding_a(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
-        assert!((spec.mz[0] - 36.0).abs() < 1e-8, "mz={}", spec.mz[0]);
-        assert_eq!(spec.intensity[0], 42.0);
-    }
-
-    #[test]
-    fn enc_a_accepts_older_sixty_sentinel() {
-        let mut sentinel = enc_a_sentinel(10000);
-        sentinel[2] = 0x60;
-        let scan = bytes_of(&[sentinel, enc_a_data(0x80, 42, 6000)]);
-        let spec = decode_encoding_a(&scan, &test_params()).unwrap();
-        assert_eq!(spec.intensity, vec![42.0]);
-    }
-
-    #[test]
-    fn enc_a_skips_zero_intensity() {
+    fn enc_a_decodes_floating_mz_and_count() {
+        // Words from public PXD058812 scan: range ends 100 and 2000 Da.
         let scan = bytes_of(&[
-            enc_a_sentinel(10000),
-            enc_a_data(0x80, 0, 6000), // intensity=0 → skip
-            enc_a_data(0x80, 10, 7000),
+            enc_a_record(0, 7, 0xC7_FFCA),
+            enc_a_record(3, 8, 0x9F_A4F2),
+            enc_a_record(0, 11, 0xF9_FF4A),
         ]);
         let spec = decode_encoding_a(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
+        assert_eq!(spec.intensity, vec![3.0]);
+        let expected = f64::from(0x9F_A4F2u32) * 2f64.powi(8 - 24);
+        assert!((spec.mz[0] - expected).abs() < 1e-9, "mz={}", spec.mz[0]);
+        assert!((encoding_a_mz(&enc_a_record(0, 7, 0xC7_FFCA)).unwrap() - 100.0).abs() < 1e-3);
+        assert!((encoding_a_mz(&enc_a_record(0, 11, 0xF9_FF4A)).unwrap() - 2000.0).abs() < 0.05);
     }
 
     #[test]
-    fn enc_a_sentinel_only_is_empty() {
-        let scan = bytes_of(&[enc_a_sentinel(10000)]);
+    fn enc_a_count_uses_both_low_bytes() {
+        let scan = bytes_of(&[enc_a_record(0x0102, 9, 0x80_0000)]);
         let spec = decode_encoding_a(&scan, &test_params()).unwrap();
-        assert!(spec.mz.is_empty());
+        assert_eq!(spec.intensity, vec![258.0]);
+    }
+
+    #[test]
+    fn enc_a_applies_calibration_to_sqrt_mz() {
+        let mut params = test_params();
+        params.cal = FunctionCal {
+            coeffs: vec![0.0, 1.0001],
+            cal_type: CalType::T1,
+        };
+        let scan = bytes_of(&[enc_a_record(1, 10, 0x80_0000)]);
+        let spec = decode_encoding_a(&scan, &params).unwrap();
+        assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
     }
 
     #[test]
@@ -402,46 +421,18 @@ mod tests {
     }
 
     #[test]
-    fn enc_a_bad_first_record_is_error() {
-        let scan = bytes_of(&[enc_a_data(0x00, 10, 5000), enc_a_data(0x90, 10, 6000)]);
-        assert!(decode_encoding_a(&scan, &test_params()).is_err());
-    }
-
-    #[test]
-    fn enc_a_without_sentinel_uses_marker_pages_and_mass_range() {
-        // 0x90: bin 40000; 0xA0: bin 32768+32768=65536;
-        // 0xB0: bin 40000+65536=105536.
-        let scan = bytes_of(&[
-            enc_a_data(0x90, 10, 40000),
-            enc_a_data(0xa0, 20, 32768),
-            enc_a_data(0xb0, 30, 40000),
-        ]);
-        let spec = decode_encoding_a(&scan, &test_params()).unwrap();
-        assert_eq!(spec.intensity, vec![10.0, 20.0, 30.0]);
-        assert!((spec.mz[0] - 4.0).abs() < 1e-8);
-        assert!((spec.mz[2] - 100.0).abs() < 1e-8);
-        assert!(spec.mz.windows(2).all(|x| x[0] < x[1]));
+    fn enc_a_rejects_unnormalized_or_flagged_words() {
+        let unnormalized = bytes_of(&[enc_a_record(1, 9, 0x40_0000)]);
+        assert!(decode_encoding_a(&unnormalized, &test_params()).is_err());
+        let mut flagged = enc_a_record(1, 9, 0x80_0000);
+        flagged[2] |= 0x01;
+        assert!(decode_encoding_a(&bytes_of(&[flagged]), &test_params()).is_err());
     }
 
     #[test]
     fn enc_a_bad_size_is_error() {
         let data = vec![0u8; 7]; // not multiple of 6
         assert!(decode_encoding_a(&data, &test_params()).is_err());
-    }
-
-    #[test]
-    fn enc_a_mz_within_declared_range() {
-        let scan = bytes_of(&[
-            enc_a_sentinel(10000),
-            enc_a_data(0x80, 1, 2001), // tof_bin just above t_low
-            enc_a_data(0x80, 1, 9999), // tof_bin just below sentinel
-        ]);
-        let p = test_params();
-        let spec = decode_encoding_a(&scan, &p).unwrap();
-        for &m in &spec.mz {
-            assert!(m >= p.mz_low, "mz={m} < mz_low={}", p.mz_low);
-            assert!(m <= p.mz_high * 1.01, "mz={m} > mz_high={}", p.mz_high);
-        }
     }
 
     // -- Encoding B tests --
@@ -603,13 +594,11 @@ mod tests {
         let spec = decode_encoding_a(scan_bytes, &params).unwrap();
 
         assert!(!spec.mz.is_empty(), "scan 3 should have peaks");
-        // NOTE: tof_bin can exceed sentinel_tof_bin (max observed 65236 > sentinel 51199)
-        // so decoded mz can exceed the declared mz_high from FUNCTNS.INF.
-        // Only check the lower bound and physical plausibility.
+        // Calibration moves peaks by well under 1%, so every decoded peak stays
+        // inside the declared acquisition range.
         for &m in &spec.mz {
-            assert!(m > 0.0 && m.is_finite(), "mz={m} is not positive/finite");
-            assert!(m >= params.mz_low * 0.9, "mz={m} unreasonably below mz_low");
-            assert!(m < 50000.0, "mz={m} unreasonably large");
+            assert!(m >= params.mz_low * 0.99, "mz={m} below mz_low");
+            assert!(m <= params.mz_high * 1.01, "mz={m} above mz_high");
         }
         for &i in &spec.intensity {
             assert!(i > 0.0, "zero intensity should have been filtered");

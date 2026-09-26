@@ -442,12 +442,13 @@ impl RawReader {
 
     /// Encoding variant for a function (1-based `func_index`).
     ///
-    /// Returns `"a"` or `"c"` for one-dimensional spectra, `"b"` for IMS.
+    /// Returns `"a"`, `"c"` or `"d"` for one-dimensional spectra, `"b"` for IMS.
     fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
         Ok(match self.function(func_index)?.encoding {
             Encoding::A => "a",
             Encoding::B => "b",
             Encoding::C => "c",
+            Encoding::D => "d",
         })
     }
 

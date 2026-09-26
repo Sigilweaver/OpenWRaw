@@ -43,8 +43,8 @@ The `peak_count` field is retained as decoded metadata but is not a valid
 assertion on the length returned by the current Encoding A decoder. In the
 corpus, a scan can contain thousands of non-zero 6-byte DAT records while the
 IDX field reports only tens or hundreds of centroid peaks (for example, 3,253
-records and 47 peaks). The decoder emits the former after removing sentinel
-and zero-intensity records; using `peak_count` as a sanity check would therefore
+records and 47 peaks). The decoder emits the former after removing zero-count
+records; using `peak_count` as a sanity check would therefore
 reject valid corpus scans unless the unimplemented centroid relationship is
 first established (Sigilweaver/OpenWRaw#24).
 

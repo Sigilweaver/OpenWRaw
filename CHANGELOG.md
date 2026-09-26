@@ -19,12 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Select 6-byte or 8-byte DAT records independently of IDX stride. Resolve
   ambiguous 22-byte versus 30-byte IDX files from record markers, and read
   the full 24-bit Variant A record count.
-- Decode additional 6-byte scans with `0x60` sentinels or no sentinel and
-  marker-extended TOF bins.
+- Decode 6-byte (Encoding A) records as a u16 ion count plus a
+  floating-point m/z word (4-bit exponent, normalized 24-bit mantissa) with
+  the header T1 polynomial applied to sqrt(m/z). The previous sentinel and
+  TOF-bin reading placed peaks outside the acquisition range.
+- Decode 8-byte records behind a 22-byte index (Vion/UNIFI exports and some
+  SYNAPT G2 files) as new Encoding D: 16.16 fixed-point intensity plus a
+  floating-point m/z word. These were previously anchored to the declared
+  mass range, which put the Vion lock mass up to 3,400 ppm off; lock-mass
+  functions now read within 70 ppm before lock correction. Fixes #33.
 - Route Python `RawReader` spectrum methods through the core Rust reader so
   UNIFI exports receive the same file discovery and DAT layout handling.
-  `function_encoding` now reports `"c"` for one-dimensional 8-byte spectra
-  instead of labeling them as IMS.
+  `function_encoding` now reports `"d"` for these 8-byte spectra instead of
+  labeling them as IMS.
 
 ### Added
 

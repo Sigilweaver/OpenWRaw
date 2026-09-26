@@ -53,17 +53,19 @@ no real sample of the latter has been found yet either (Sigilweaver/OpenWRaw#13)
 
 ## DAT Encoding Variants
 
-Three distinct record encodings have been observed in `_FUNCnnn.DAT`:
+Four record encodings are distinguished in `_FUNCnnn.DAT`:
 
 | Encoding | Record size | IDX variant | Instruments | Description |
 |----------|-------------|-------------|-------------|-------------|
-| A | 6 bytes | Variant A (22-byte IDX) | Older QTOF (Q-TOF Ultima) | flags(u8), zero(u8), intensity(u8), tof_bin(u16) |
+| A | 6 bytes | Variant A (22-byte IDX) | Older QTOF, Q-Tof Premier class | count(u16), m/z word(exponent nibble + u24 mantissa) |
 | B | 8 bytes | Variant B (30-byte IDX) | SYNAPT G2-Si IMS | zero(u16), count(u16), dt_bin(u16), tof_bin(u16) |
 | C | 8 bytes | Variant B (30-byte IDX) | Xevo G2-XS QTof | zero(u16), count(u16), sub_bin(u16), tof_bin(u16) |
+| D | 8 bytes | Variant A (22-byte IDX) | Vion (UNIFI export), some SYNAPT G2 | intensity(u32 16.16), m/z word(5-bit exponent + 27-bit mantissa) |
 
-All three encodings are fully decoded. Encodings A, B, and C are decodable to
-m/z and (for Encoding B) IMS drift time using formulas derived from `_extern.inf`,
-`_FUNCTNS.INF`, and the T1 calibration polynomial.
+Encodings A and D store m/z directly as a floating-point word and are checked
+against lock-mass references (see `_FUNCnnn.DAT`). The B and C readings below
+anchor each scan's first and last records to the declared mass range; they
+fail the lock-mass check and are under review.
 
 ## IDX Variants
 
@@ -78,19 +80,18 @@ presence of `APEXnnnD.BIN` or `APEXnnnDIONS.CSV` is the reliable IMS indicator.
 
 ## m/z Decoding Summary
 
-All three encodings are fully decodable to m/z. Encoding B additionally yields IMS drift time.
+Encodings A and D store m/z directly; only the T1 polynomial applies, to
+sqrt(m/z). Encodings B and C use the flight-time model below.
 
 ```
-# Common to all:
+# Encoding A (6-byte) and D (8-byte, 22-byte IDX):
+mz_uncal = mantissa * 2^(exponent - mantissa_bits)   # 24 bits (A) or 27 bits (D)
+mz       = (T1(sqrt(mz_uncal)))^2
+
+# Common to B and C:
 A_us   = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6  # from _extern.inf
 mz     = (t_cal_us / A_us)^2
 t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial, _HEADER.TXT
-
-# Encoding A (6-byte, non-IMS QTOF):
-#   First record of each scan is a zero-intensity sentinel;
-#   sentinel.tof_bin = max TOF bin corresponding to mz_high.
-t_bin_us   = A_us * sqrt(mz_high) / sentinel_tof_bin  # bin width in microseconds
-t_raw_us   = tof_bin * t_bin_us
 
 # Encoding B (8-byte, SYNAPT G2-Si IMS):
 #   bytes[2:4]=count(u16), bytes[4:6]=dt_bin(u16), bytes[6:8]=tof_bin(u16)
@@ -141,6 +142,7 @@ _CHROMS.INF uses a 128-byte header + 85-byte records (different stride).
 | Waters SYNAPT G2-Si | IMS + MS; IDX Variant B; DAT Encoding B (IMS) |
 | Waters Xevo G2-XS QTof | No IMS; IDX Variant B; DAT Encoding C |
 | Waters Q-TOF Ultima | No IMS; IDX Variant A; DAT Encoding A |
+| Waters Vion IMS QTof (UNIFI export) | IDX Variant A; DAT Encoding D |
 
 ## Corpus
 

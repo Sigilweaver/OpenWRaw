@@ -18,7 +18,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::raw::data::{
-    decode_encoding_a, decode_encoding_b, decode_encoding_c, DecodeParams, ImsSpectrum, Spectrum,
+    decode_encoding_a, decode_encoding_b, decode_encoding_c, decode_encoding_d, DecodeParams,
+    ImsSpectrum, Spectrum,
 };
 use crate::raw::extern_inf::ExternInf;
 use crate::raw::func_sts::FuncSts;
@@ -35,6 +36,8 @@ pub enum Encoding {
     B,
     /// 8-byte non-IMS records (intensity, sub_bin, tof_bin). Variant B index.
     C,
+    /// 8-byte records (16.16 intensity, floating-point m/z). Variant A index.
+    D,
 }
 
 /// One acquisition function's static metadata, ready for decoding.
@@ -123,8 +126,7 @@ impl Reader {
             let dat_size = fs::metadata(&dat_path)?.len();
             let encoding = match &scan_index {
                 ScanIndex::A(records) => match variant_a_record_width(records) {
-                    Some(8) if is_synapt => Encoding::B,
-                    Some(8) => Encoding::C,
+                    Some(8) => Encoding::D,
                     _ => Encoding::A,
                 },
                 ScanIndex::B(_) => {
@@ -209,6 +211,7 @@ impl Reader {
             Encoding::A => DecodedSpectrum::Plain(decode_encoding_a(&bytes, &params)?),
             Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
             Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
+            Encoding::D => DecodedSpectrum::Plain(decode_encoding_d(&bytes, &params)?),
         };
         let collision_energy_ev = entry
             .sts
@@ -337,24 +340,15 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                     entry.index, scan_idx
                 ))
             })?;
-            // Some 22-byte indexes undercount DAT records. The next offset is
-            // authoritative when it marks a whole number of records.
+            // Variant A stores the record count directly; the width depends
+            // on the DAT layout (6 bytes for Encoding A, 8 for Encoding D).
             let offset = rec.dat_offset as u64;
             let width = if matches!(entry.encoding, Encoding::A) {
                 6
             } else {
                 8
             };
-            let next_offset = records
-                .get(scan_idx + 1)
-                .map(|r| r.dat_offset as u64)
-                .unwrap_or(entry.dat_size);
-            let span = next_offset.saturating_sub(offset);
-            let length = if span > 0 && span % width == 0 {
-                span
-            } else {
-                (rec.n_records as u64) * width
-            };
+            let length = (rec.n_records as u64) * width;
             (offset, length, rec.retention_time_min)
         }
         ScanIndex::B(records) => {
@@ -394,6 +388,7 @@ pub fn encoding_counts(reader: &Reader) -> BTreeMap<&'static str, usize> {
             Encoding::A => "A",
             Encoding::B => "B",
             Encoding::C => "C",
+            Encoding::D => "D",
         };
         *out.entry(key).or_insert(0) += 1;
     }
@@ -547,29 +542,9 @@ mod tests {
         ];
         assert_eq!(variant_a_record_width(&records), Some(8));
         let mut entry = entry_with(ScanIndex::A(records), 56);
-        entry.encoding = Encoding::C;
+        entry.encoding = Encoding::D;
         assert_eq!(scan_slice(&entry, 0).unwrap().1, 40);
         assert_eq!(scan_slice(&entry, 1).unwrap().1, 16);
-    }
-
-    #[test]
-    fn variant_a_uses_next_offset_when_record_count_undercounts() {
-        let records = vec![
-            ScanIndexA {
-                dat_offset: 0,
-                n_records: 2,
-                retention_time_min: 0.0,
-                peak_count: 0,
-            },
-            ScanIndexA {
-                dat_offset: 24,
-                n_records: 1,
-                retention_time_min: 0.1,
-                peak_count: 0,
-            },
-        ];
-        let entry = entry_with(ScanIndex::A(records), 30);
-        assert_eq!(scan_slice(&entry, 0).unwrap().1, 24);
     }
 
     #[test]

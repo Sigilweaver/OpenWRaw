@@ -2,76 +2,104 @@
 
 Binary spectrum data file. One file per function.
 Contains all spectra for that function, stored contiguously.
-Two distinct record formats observed depending on acquisition mode.
+Several record formats are observed depending on index variant and acquisition software.
 
-## Encoding A: 6-byte records (non-IMS / simple TOF-MS)
+## Encoding A: 6-byte records (Variant A index)
 
-### Status: Decoded and Validated (Phase 3)
+### Status: Decoded; m/z checked against lock-mass references (2026-09-26)
 
-Observed in: PXD058812 (QTOF, native MS, no ion mobility)
+Observed in: PXD058812, PXD003126, PXD010569, PXD021125, PXD029515,
+PXD041695 (older QTof and Q-Tof Premier-class instruments, MassLynx 4.0-4.1)
 
 Key facts:
 - File is a flat array of 6-byte records (no top-level file header)
-- Scan boundaries are given by IDX Variant A offsets (u32@0x00)
-- Older scans begin with a sentinel record that encodes the scale factor for t_bin;
-  other QTof scans have no sentinel
-- Blank/empty scans have exactly 2 records (12 bytes): a sentinel + one null record
-- m/z values are NOT stored directly; the TOF time-bin is stored and decoded with calibration
+- Scan boundaries and record counts come from IDX Variant A (offset u32@0x00,
+  count in the low 24 bits of u32@0x04)
+- Each record stores an ion count and a floating-point m/z word; there are
+  no sentinel records and no TOF bins to rescale
 
 ### 6-byte Record Layout
 
-| Bytes | Type    | Confirmed | Description |
-|-------|---------|-----------|-------------|
-| 0     | u8      | Partial   | Flags: 0=normal, 2=?, 3=?, 4=?; may encode sub-bin phase offset |
-| 1     | u8      | Yes       | Always 0x00 |
-| 2     | u8      | Partial   | Block type: 0x60/0x70=sentinel, 0x80/0x90/0xA0/0xB0=data |
-| 3     | u8      | Yes       | Intensity (8-bit TDC count, 0-255); 255 = saturated |
-| 4-5   | u16 LE  | Yes       | tof_bin: TOF time-bin index |
-
-Data records appear grouped by block type in decreasing order (0x80 first, then 0x90, 0xA0, 0xB0).
-Within each block type, records are sorted by ascending tof_bin. The block type likely encodes
-the intensity dynamic range tier (strong peaks first, weak peaks last), but the exact multiplier
-relationship between tiers is not yet fully characterized.
-
-### Sentinel Record
-
-Older scans begin with one sentinel record, such as `00 00 70 CA FF C7`.
-- byte[2] = 0x60 or 0x70 (distinguishes sentinel from data blocks 0x80+)
-- bytes[4:6] u16 LE = **sentinel_tof_bin** = the maximum TOF bin used in this scan,
-  corresponding to the flight time of an ion at mz_high
-
-The sentinel_tof_bin encodes the TOF scale and varies with instrument calibration.
-In PXD058812: sentinel_tof_bin = 51199 for mz_high = 3000 Da.
-
-### TOF m/z Decoding (Encoding A)
-
-Calibration constants: `_HEADER.TXT` (Cal Function N polynomial), `_extern.inf` (Lteff, Veff).
+| Bytes | Type    | Description |
+|-------|---------|-------------|
+| 0-1   | u16 LE  | Ion count (TDC hits; small integers, 0 for range markers) |
+| 2     | u8      | High nibble: m/z exponent `e`. Low nibble: always 0 in the corpus |
+| 3-5   | u24 LE  | m/z mantissa `M`, normalized (bit 23 always set) |
 
 ```
-A_us         = (Lteff_mm / 1000) / sqrt(2 * e_per_Da * Veff) * 1e6   [µs/sqrt(Da)]
-t_bin_us     = A_us * sqrt(mz_high) / sentinel_tof_bin               [µs/bin]
-t_raw_us     = tof_bin * t_bin_us                                     [µs]
-t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                      [T1 polynomial]
-mz           = (t_cal_us / A_us)^2                                    [Da]
+mz_uncal = M * 2^(e - 24)          # M in [2^23, 2^24), so mz_uncal in [2^(e-1), 2^e)
+mz       = (T1(sqrt(mz_uncal)))^2  # _HEADER.TXT "Cal Function N" polynomial
 ```
 
-where `mz_high` is from `_FUNCTNS.INF` +0x120 and `sentinel_tof_bin` from bytes[4:6] of the
-first record of each scan.
+The first and last records of a scan have count 0 and decode to the
+acquisition range in `_FUNCTNS.INF`: in PXD058812 `70 CA FF C7` is
+`0xC7FFCA * 2^-17 = 100.000` and `B0 4A FF F9` is
+`0xF9FF4A * 2^-13 = 1999.98` for a 100-2000 function. The decoder rejects
+records whose low nibble is non-zero or whose mantissa is not normalized.
 
-Validated: PXD058812/molecular_mass_P15_01.raw scan 5 (RT=0.12 min).
-Strongest peaks at m/z ≈ 1693-1846 Da, consistent with a native MS protein (charge state envelope
-matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705 Da).
+Earlier versions read byte 2 as a "block type", byte 3 as an 8-bit intensity
+and bytes 4-5 as a TOF bin anchored to `mz_high`. That reading put peaks
+outside the acquisition range (for example 820-3312 in a 100-2000 function)
+and is superseded.
 
-### Six-byte scans without a sentinel
+### Validation (clean-room)
 
-PXD003126, PXD029515, and PXD041695 start with a data record. Their block
-markers extend the 16-bit TOF bin in 32,768-bin pages: 0x90 adds zero,
-0xA0 adds 32,768, and 0xB0 adds 65,536. At marker transitions the resulting
-bin remains increasing. The first and last full bins anchor the acquisition
-mass range from `_FUNCTNS.INF`, following the same linear flight-time mapping
-used by the 8-byte decoder. This mapping is inferred from the public files;
-independent mass-accuracy validation remains to be done. All scans in the
-three cited bundles decode without errors with this mapping.
+- Every record in six bundles has a zero low nibble and a normalized
+  mantissa, and decoded ranges match `_FUNCTNS.INF` to within 0.03 Da.
+- Lock-mass functions, after T1 calibration: PXD003126 [Glu1]-fibrinopeptide
+  B [M+2H]2+ +24 ppm (+87 ppm without T1); PXD021125 +25 and +38 ppm.
+- PXD041695 background ions calibrate to 429.092 and 445.12-445.13, matching
+  the common polysiloxane contaminants at 429.0887 and 445.1200; without T1
+  they are about 900 ppm high.
+- PXD029515's lock function shows the Glu-fib envelope at a consistent
+  -150 ppm on both isotopes, while PXD003126, acquired with identical
+  `_extern.inf` geometry and software, sits at +24 ppm. The offset is
+  attributed to that instrument's calibration at acquisition time; this has
+  not been proven.
+
+## Encoding D: 8-byte records behind a Variant A index
+
+### Status: Decoded; m/z checked against physics and lock-mass references (2026-09-26)
+
+Observed in: PXD081045 (Vion IMS QTof, UNIFI 2.0 export), PXD001123 and
+PXD009047 (SYNAPT G2, MassLynx 4.1), PXD037102
+
+Key facts:
+- 22-byte IDX Variant A index; consecutive offsets divided by record counts
+  give an 8-byte record width
+- No sentinel records; the first and last records are ordinary profile points
+
+### 8-byte Record Layout
+
+| Bytes | Type    | Description |
+|-------|---------|-------------|
+| 0-3   | u32 LE  | Intensity, unsigned 16.16 fixed point (bytes 0-1 are dyadic fractions such as 1/2, 1/4, 3/4) |
+| 4-7   | u32 LE  | m/z word: 5-bit exponent `E` (bits 27-31), 27-bit mantissa `F` with bit 26 always set |
+
+```
+mz_uncal = F * 2^(E - 27)          # F in [2^26, 2^27)
+mz       = (T1(sqrt(mz_uncal)))^2
+```
+
+### Validation (clean-room)
+
+- Profile points are spaced by exactly one ADC sample. With flight time
+  `t = A_us * sqrt(m/z)` from `Lteff`/`Veff` and the `ADC Sample Frequency`
+  in `_extern.inf`, one sample is `2 * sqrt(m/z) * A_us / f`. The median
+  observed spacing divided by that prediction is 0.9986-1.0028 in every
+  100-Da band from 200 to 1900 m/z (PXD081045, 7.2 GHz) and 0.9998 on the
+  SYNAPT G2 files (3.0 GHz). A linear TOF-bin reading cannot satisfy this.
+- Isotope spacing is flat at 4 words per Da over 256-512 m/z and 2 per Da
+  over 512-1024, the signature of an m/z (not time) mantissa.
+- Lock mass after T1: SYNAPT G2 Glu-fib and Leu-Enk at -10 and -11 ppm.
+  Vion Leu-Enk (`ReferenceMass1` 556.27658 in `_extern.inf`) at +20 to
+  +69 ppm across 45 runs, with one offset per acquisition batch; the intense
+  monoisotopic peak saturates and centroids 10-20 ppm higher than its
+  isotopes. Without T1 the same peaks are 130-146 ppm low.
+
+The Vion files were previously decoded by the Encoding C first/last-record
+anchor, which stretched each scan onto the declared mass range and put
+Leu-Enk anywhere from -1447 to +3378 ppm.
 
 ## Encoding B: 8-byte records (IMS mode - SYNAPT G2-Si)
 
@@ -244,8 +272,11 @@ In practice, IMS datasets always have `_PROC*.DAT/IDX/STS` files or Apex3D outpu
 
 ## Fields Under Investigation
 
-- Encoding A: exact semantics of byte[0] flag values (0, 2, 3, 4); possibly sub-bin phase offset
-- Encoding A: exact multiplier/scale relationship between block types (0x80-0xB0) and TDC intensity
+- Encoding A: meaning of the byte 2 low nibble (always zero in the corpus)
+- Encodings B and C: bytes 4-7 pass the same floating-point m/z and ADC-sample
+  checks as Encoding D in every 30-byte-index function sampled, and bytes 0-1
+  look like fractional intensity rather than a drift axis. The first/last
+  record anchor used by the current B and C decoders fails lock-mass checks.
 - Encoding B: whether byte[0] ever takes non-zero values and what they encode
 
 ## Reference Sources
