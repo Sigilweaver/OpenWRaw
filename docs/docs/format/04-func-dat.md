@@ -13,7 +13,8 @@ Observed in: PXD058812 (QTOF, native MS, no ion mobility)
 Key facts:
 - File is a flat array of 6-byte records (no top-level file header)
 - Scan boundaries are given by IDX Variant A offsets (u32@0x00)
-- Each scan begins with a sentinel record that encodes the scale factor for t_bin
+- Older scans begin with a sentinel record that encodes the scale factor for t_bin;
+  other QTof scans have no sentinel
 - Blank/empty scans have exactly 2 records (12 bytes): a sentinel + one null record
 - m/z values are NOT stored directly; the TOF time-bin is stored and decoded with calibration
 
@@ -23,7 +24,7 @@ Key facts:
 |-------|---------|-----------|-------------|
 | 0     | u8      | Partial   | Flags: 0=normal, 2=?, 3=?, 4=?; may encode sub-bin phase offset |
 | 1     | u8      | Yes       | Always 0x00 |
-| 2     | u8      | Partial   | Block type: 0x70=sentinel, 0x80/0x90/0xA0/0xB0=data (higher=more sensitive range) |
+| 2     | u8      | Partial   | Block type: 0x60/0x70=sentinel, 0x80/0x90/0xA0/0xB0=data |
 | 3     | u8      | Yes       | Intensity (8-bit TDC count, 0-255); 255 = saturated |
 | 4-5   | u16 LE  | Yes       | tof_bin: TOF time-bin index |
 
@@ -34,8 +35,8 @@ relationship between tiers is not yet fully characterized.
 
 ### Sentinel Record
 
-Every scan begins with exactly ONE sentinel record: `00 00 70 CA FF C7` (observed).
-- byte[2] = 0x70 (distinguishes sentinel from data blocks 0x80+)
+Older scans begin with one sentinel record, such as `00 00 70 CA FF C7`.
+- byte[2] = 0x60 or 0x70 (distinguishes sentinel from data blocks 0x80+)
 - bytes[4:6] u16 LE = **sentinel_tof_bin** = the maximum TOF bin used in this scan,
   corresponding to the flight time of an ion at mz_high
 
@@ -60,6 +61,17 @@ first record of each scan.
 Validated: PXD058812/molecular_mass_P15_01.raw scan 5 (RT=0.12 min).
 Strongest peaks at m/z ≈ 1693-1846 Da, consistent with a native MS protein (charge state envelope
 matching BSA or similar ~60-66 kDa protein, e.g. z=36 → 1846 Da, z=39 → 1705 Da).
+
+### Six-byte scans without a sentinel
+
+PXD003126, PXD029515, and PXD041695 start with a data record. Their block
+markers extend the 16-bit TOF bin in 32,768-bin pages: 0x90 adds zero,
+0xA0 adds 32,768, and 0xB0 adds 65,536. At marker transitions the resulting
+bin remains increasing. The first and last full bins anchor the acquisition
+mass range from `_FUNCTNS.INF`, following the same linear flight-time mapping
+used by the 8-byte decoder. This mapping is inferred from the public files;
+independent mass-accuracy validation remains to be done. All scans in the
+three cited bundles decode without errors with this mapping.
 
 ## Encoding B: 8-byte records (IMS mode - SYNAPT G2-Si)
 

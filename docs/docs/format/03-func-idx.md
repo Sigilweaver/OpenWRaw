@@ -10,7 +10,8 @@ fields remain without a confirmed interpretation.
 
 ## Variant A: 22-byte record (non-IMS / simple TOF-MS)
 
-Observed in: PXD058812 (Waters QTOF, native MS, no ion mobility)
+Observed in: PXD058812 (Waters QTOF), PXD041695 (QTof), and
+PXD081045 (Vion UNIFI export). The last uses 8-byte DAT records.
 
 Key facts:
 - File size = N x 22 bytes (exact, no header)
@@ -20,7 +21,7 @@ Key facts:
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
 | 0x00   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x04   | u32  | **Yes**   | `(0x1800 << 16) \| n_records`: lower 16 bits = DAT record count for this scan; upper 16 bits = 0x1800 (constant type/format code) |
+| 0x04   | u32  | **Yes**   | `(0x18 << 24) \| n_records`: lower 24 bits = DAT record count; high byte = 0x18 format marker |
 | 0x08   | f32  | Partial   | Non-zero for data scans, 0 for blank scans. Correlates with scan signal level but no confirmed formula. |
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
 | 0x10   | u16  | **Yes**   | Centroid peak count (0 for blank scans, 17-196 per data scan in corpus) |
@@ -31,11 +32,12 @@ Validated: 22 x 197 = 4334 bytes (molecular_mass_P15_01.raw), 22 x 426 = 9372 by
 
 ### Field +0x04: Packed type-code and record count
 
-Format: `(0x1800 << 16) | n_records`.
+Format: `(0x18 << 24) | n_records`.
 
-The lower 16 bits equal the number of 6-byte records in the paired .DAT scan (confirmed
-196/196 non-final scans in PXD058812). For blank scans (scan 0-2), n_records = 2.
-The upper 16 bits are always 0x1800 (= 6144), serving as an encoding type marker.
+The lower 24 bits count DAT records. PXD041695 has scans with more than 65,535
+records, so reading only the lower 16 bits truncates them. The high byte is
+0x18. DAT records may be 6 or 8 bytes; consecutive DAT offsets establish the
+width. Those offsets also establish scan boundaries directly.
 
 The `peak_count` field is retained as decoded metadata but is not a valid
 assertion on the length returned by the current Encoding A decoder. In the
@@ -46,8 +48,10 @@ and zero-intensity records; using `peak_count` as a sanity check would therefore
 reject valid corpus scans unless the unimplemented centroid relationship is
 first established (Sigilweaver/OpenWRaw#24).
 
-This means `n_records = u32@0x04 & 0xFFFF` gives an alternative way to read the scan's
-record count without computing the difference between consecutive DAT offsets.
+`n_records = u32@0x04 & 0x00FFFFFF` provides the record count when the next
+offset is unavailable. When the IDX length is divisible by both 22 and 30,
+the repeated 0x18 marker and monotonic offsets distinguish this variant from
+Variant B.
 
 ## Variant B: 30-byte record (IMS / HDMS and non-IMS QTof)
 

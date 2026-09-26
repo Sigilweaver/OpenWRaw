@@ -5,9 +5,8 @@
 //!
 //! * Parses `_HEADER.TXT`, `_FUNCTNS.INF`, `_extern.inf`.
 //! * Discovers every `_FUNCnnn.IDX` / `_FUNCnnn.DAT` pair on disk.
-//! * Picks an encoding (A / B / C) per function based on the IDX stride
-//!   (Variant A -> Encoding A) plus the instrument name on Variant B
-//!   (`SYNAPT*` -> Encoding B IMS, anything else -> Encoding C).
+//! * Picks an encoding (A / B / C) per function from IDX stride, DAT record
+//!   width, and instrument name (`SYNAPT*` indicates Encoding B IMS).
 //! * Provides [`Reader::iter_spectra`] which yields one decoded spectrum
 //!   per scan, in `(function_index, scan_index_in_function)` order,
 //!   skipping lock-mass functions.
@@ -311,7 +310,11 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
             // Some 22-byte indexes undercount DAT records. The next offset is
             // authoritative when it marks a whole number of records.
             let offset = rec.dat_offset as u64;
-            let width = if matches!(entry.encoding, Encoding::A) { 6 } else { 8 };
+            let width = if matches!(entry.encoding, Encoding::A) {
+                6
+            } else {
+                8
+            };
             let next_offset = records
                 .get(scan_idx + 1)
                 .map(|r| r.dat_offset as u64)
@@ -471,7 +474,7 @@ mod tests {
         let entry = entry_with(
             ScanIndex::A(vec![ScanIndexA {
                 dat_offset: 0,
-                n_records: u16::MAX, // claims 393,210 bytes
+                n_records: u16::MAX.into(), // claims 393,210 bytes
                 retention_time_min: 0.0,
                 peak_count: 0,
             }]),
@@ -499,8 +502,18 @@ mod tests {
     #[test]
     fn variant_a_eight_byte_records_use_index_count() {
         let records = vec![
-            ScanIndexA { dat_offset: 0, n_records: 5, retention_time_min: 0.0, peak_count: 0 },
-            ScanIndexA { dat_offset: 40, n_records: 2, retention_time_min: 0.1, peak_count: 0 },
+            ScanIndexA {
+                dat_offset: 0,
+                n_records: 5,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            },
+            ScanIndexA {
+                dat_offset: 40,
+                n_records: 2,
+                retention_time_min: 0.1,
+                peak_count: 0,
+            },
         ];
         assert_eq!(variant_a_record_width(&records), Some(8));
         let mut entry = entry_with(ScanIndex::A(records), 56);
@@ -512,8 +525,18 @@ mod tests {
     #[test]
     fn variant_a_uses_next_offset_when_record_count_undercounts() {
         let records = vec![
-            ScanIndexA { dat_offset: 0, n_records: 2, retention_time_min: 0.0, peak_count: 0 },
-            ScanIndexA { dat_offset: 24, n_records: 1, retention_time_min: 0.1, peak_count: 0 },
+            ScanIndexA {
+                dat_offset: 0,
+                n_records: 2,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            },
+            ScanIndexA {
+                dat_offset: 24,
+                n_records: 1,
+                retention_time_min: 0.1,
+                peak_count: 0,
+            },
         ];
         let entry = entry_with(ScanIndex::A(records), 30);
         assert_eq!(scan_slice(&entry, 0).unwrap().1, 24);

@@ -21,9 +21,9 @@ pub const VARIANT_A_TYPE_MARKER: u32 = 0x1800;
 pub struct ScanIndexA {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.
     pub dat_offset: u32,
-    /// Number of 6-byte DAT records in this scan.
-    /// Derived from the lower 16 bits of the packed field at +0x04.
-    pub n_records: u16,
+    /// Number of DAT records in this scan. The packed field at +0x04 uses
+    /// its high byte as a format marker and its low 24 bits as the count.
+    pub n_records: u32,
     /// Retention time (minutes).
     pub retention_time_min: f32,
     /// Number of centroid peaks (0 for blank scans).
@@ -70,12 +70,20 @@ impl ScanIndex {
             (false, true) => Ok(ScanIndex::B(parse_variant_b(data)?)),
             (true, true) if len == 0 => Ok(ScanIndex::A(Vec::new())),
             (true, true) => {
-                // Ambiguous: file size is a multiple of both 22 and 30.
-                // This can only happen when len is a multiple of lcm(22,30)=330.
-                // In practice this is vanishingly rare; default to Variant A
-                // since it was the earlier format and any disambiguation should
-                // be done by the caller using _FUNCTNS.INF function subtype.
-                Ok(ScanIndex::A(parse_variant_a(data)?))
+                // At a 330-byte boundary, use the Variant A packed marker and
+                // monotonically increasing DAT offsets to disambiguate.
+                let looks_a = data.chunks_exact(STRIDE_A).all(|rec| {
+                    let packed = u32::from_le_bytes(rec[4..8].try_into().unwrap());
+                    packed & 0xff00_0000 == 0x1800_0000
+                }) && data
+                    .chunks_exact(STRIDE_A)
+                    .map(|rec| u32::from_le_bytes(rec[..4].try_into().unwrap()))
+                    .is_sorted();
+                if looks_a {
+                    Ok(ScanIndex::A(parse_variant_a(data)?))
+                } else {
+                    Ok(ScanIndex::B(parse_variant_b(data)?))
+                }
             }
             (false, false) => Err(crate::Error::Parse(format!(
                 "_FUNCnnn.IDX: size {len} is not a multiple of {STRIDE_A} (Variant A) \
@@ -108,7 +116,7 @@ fn parse_variant_a(data: &[u8]) -> crate::Result<Vec<ScanIndexA>> {
 
         let dat_offset = crate::bytes::read_u32_le(rec, 0x00)?;
         let packed = crate::bytes::read_u32_le(rec, 0x04)?;
-        let n_records = (packed & 0xFFFF) as u16;
+        let n_records = packed & 0x00FF_FFFF;
         let retention_time_min = crate::bytes::read_f32_le(rec, 0x0C)?;
         let peak_count = crate::bytes::read_u16_le(rec, 0x10)?;
 
@@ -149,10 +157,10 @@ mod tests {
 
     // --- helpers ---
 
-    fn make_a_record(dat_off: u32, n_recs: u16, rt: f32, peaks: u16) -> [u8; STRIDE_A] {
+    fn make_a_record(dat_off: u32, n_recs: u32, rt: f32, peaks: u16) -> [u8; STRIDE_A] {
         let mut rec = [0u8; STRIDE_A];
         rec[0x00..0x04].copy_from_slice(&dat_off.to_le_bytes());
-        let packed: u32 = ((VARIANT_A_TYPE_MARKER) << 16) | n_recs as u32;
+        let packed: u32 = ((VARIANT_A_TYPE_MARKER) << 16) | n_recs;
         rec[0x04..0x08].copy_from_slice(&packed.to_le_bytes());
         rec[0x0C..0x10].copy_from_slice(&rt.to_le_bytes());
         rec[0x10..0x12].copy_from_slice(&peaks.to_le_bytes());
@@ -168,6 +176,31 @@ mod tests {
 
     fn a_data(records: &[[u8; STRIDE_A]]) -> Vec<u8> {
         records.iter().flat_map(|r| r.iter().copied()).collect()
+    }
+
+    #[test]
+    fn variant_a_count_uses_all_twenty_four_bits() {
+        let data = a_data(&[make_a_record(0, 110_646, 0.0, 0)]);
+        let ScanIndex::A(records) = ScanIndex::from_bytes(&data).unwrap() else {
+            panic!("expected Variant A");
+        };
+        assert_eq!(records[0].n_records, 110_646);
+    }
+
+    #[test]
+    fn ambiguous_size_uses_record_markers() {
+        let a: Vec<_> = (0..15)
+            .map(|i| make_a_record(i * 6, 1, i as f32, 0))
+            .collect();
+        assert!(matches!(
+            ScanIndex::from_bytes(&a_data(&a)).unwrap(),
+            ScanIndex::A(_)
+        ));
+        let b: Vec<_> = (0..11).map(|i| make_b_record(i * 8, i as f32)).collect();
+        assert!(matches!(
+            ScanIndex::from_bytes(&b_data(&b)).unwrap(),
+            ScanIndex::B(_)
+        ));
     }
 
     fn b_data(records: &[[u8; STRIDE_B]]) -> Vec<u8> {

@@ -388,9 +388,7 @@ End Mass                                       2000.0\r\n\
 
     #[test]
     fn missing_pusher_timing_is_preserved() {
-        let ext: ExternInf = "Lteff 2200\nVeff 5227.617508"
-            .parse()
-            .unwrap();
+        let ext: ExternInf = "Lteff 2200\nVeff 5227.617508".parse().unwrap();
         assert_eq!(ext.pusher_interval_for(1), None);
     }
 

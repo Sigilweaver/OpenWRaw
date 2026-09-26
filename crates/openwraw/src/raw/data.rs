@@ -54,8 +54,8 @@ fn is_enc_a_sentinel(marker: u8) -> bool {
 /// `scan_bytes` must be the exact bytes of one scan as given by the paired
 /// `_FUNCnnn.IDX` Variant A record (offset, n_records × 6).
 ///
-/// The first record of every scan is a sentinel (block_type == 0x70); its
-/// `tof_bin` field encodes the scale factor for the entire scan.
+/// Older scans begin with a 0x60 or 0x70 sentinel that encodes the TOF scale.
+/// Later QTof scans use marker pages and first/last mass-range anchors.
 pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
     if scan_bytes.is_empty() {
         return Ok(Spectrum::default());
@@ -122,7 +122,10 @@ fn encoding_a_full_bin(rec: &[u8]) -> crate::Result<f64> {
     Ok(f64::from(read_u16_le(rec, 4)?) + f64::from(page * 32768))
 }
 
-fn decode_encoding_a_unanchored(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
+fn decode_encoding_a_unanchored(
+    scan_bytes: &[u8],
+    params: &DecodeParams,
+) -> crate::Result<Spectrum> {
     let n = scan_bytes.len() / 6;
     if n < 2 {
         return Ok(Spectrum::default());
