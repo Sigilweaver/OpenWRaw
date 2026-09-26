@@ -35,7 +35,8 @@ fn bundles(root: &Path) -> std::io::Result<Vec<PathBuf>> {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let kind = entry.file_type()?;
-            if kind.is_dir() {
+            // Skip macOS archive resource forks (`__MACOSX/._name` stubs).
+            if kind.is_dir() && entry.file_name() != "__MACOSX" {
                 pending.push(entry.path());
             } else if kind.is_file()
                 && entry
