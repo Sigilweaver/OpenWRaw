@@ -116,7 +116,11 @@ impl Reader {
             let scan_index = ScanIndex::from_path(&idx_path)?;
             let dat_size = fs::metadata(&dat_path)?.len();
             let encoding = match &scan_index {
-                ScanIndex::A(_) => Encoding::A,
+                ScanIndex::A(records) => match variant_a_record_width(records) {
+                    Some(8) if is_synapt => Encoding::B,
+                    Some(8) => Encoding::C,
+                    _ => Encoding::A,
+                },
                 ScanIndex::B(_) => {
                     if is_synapt {
                         Encoding::B
@@ -246,6 +250,22 @@ fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
     })
 }
 
+/// The 22-byte index is paired with both 6-byte and 8-byte DAT records.
+/// Consecutive offsets give a direct width check without reading peak data.
+fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u64> {
+    records.windows(2).find_map(|pair| {
+        let count = u64::from(pair[0].n_records);
+        let bytes = u64::from(pair[1].dat_offset).checked_sub(u64::from(pair[0].dat_offset))?;
+        if count == 0 || bytes == 0 || bytes % count != 0 {
+            return None;
+        }
+        match bytes / count {
+            width @ (6 | 8) => Some(width),
+            _ => None,
+        }
+    })
+}
+
 /// One scan after decoding.
 #[derive(Debug, Clone)]
 pub struct DecodedScan {
@@ -288,9 +308,10 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                     entry.index, scan_idx
                 ))
             })?;
-            // Variant A stores n_records directly: each record is 6 bytes.
+            // Variant A stores n_records directly; newer DAT records are 8 bytes.
             let offset = rec.dat_offset as u64;
-            let length = (rec.n_records as u64) * 6;
+            let width = if matches!(entry.encoding, Encoding::A) { 6 } else { 8 };
+            let length = (rec.n_records as u64) * width;
             (offset, length, rec.retention_time_min)
         }
         ScanIndex::B(records) => {
@@ -358,13 +379,18 @@ mod tests {
     }
 
     fn entry_with(scan_index: ScanIndex, dat_size: u64) -> FunctionEntry {
+        let encoding = if matches!(scan_index, ScanIndex::A(_)) {
+            Encoding::A
+        } else {
+            Encoding::C
+        };
         FunctionEntry {
             index: 1,
             info: dummy_info(1),
             scan_index,
             dat_path: PathBuf::new(),
             dat_size,
-            encoding: Encoding::C,
+            encoding,
             cal: FunctionCal::default(),
             sts: None,
         }
@@ -458,5 +484,18 @@ mod tests {
         );
         let (_, length, _) = scan_slice(&entry, 0).unwrap();
         assert_eq!(length, 30);
+    }
+
+    #[test]
+    fn variant_a_eight_byte_records_use_index_count() {
+        let records = vec![
+            ScanIndexA { dat_offset: 0, n_records: 5, retention_time_min: 0.0, peak_count: 0 },
+            ScanIndexA { dat_offset: 40, n_records: 2, retention_time_min: 0.1, peak_count: 0 },
+        ];
+        assert_eq!(variant_a_record_width(&records), Some(8));
+        let mut entry = entry_with(ScanIndex::A(records), 56);
+        entry.encoding = Encoding::C;
+        assert_eq!(scan_slice(&entry, 0).unwrap().1, 40);
+        assert_eq!(scan_slice(&entry, 1).unwrap().1, 16);
     }
 }
