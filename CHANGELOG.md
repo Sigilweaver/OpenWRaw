@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `audit_corpus` example to check every non-lock-mass scan in a corpus and
-  fail if any bundle or scan does not decode.
+  fail if any bundle or scan does not decode, then check m/z accuracy on
+  lock-mass functions against the file's `ReferenceMass1` or the standard
+  Leu-Enk / Glu-fib references (isotope-confirmed, 100 ppm tolerance).
+  `--lock-only` runs just the lock-mass check.
 - Parsing and decoding errors now identify the side file or the RAW bundle,
   function, and scan involved, including errors returned by Python bindings.
 - Populate `PrecursorInfo::activation` from `_FUNCnnn.STS`'s "ETD
