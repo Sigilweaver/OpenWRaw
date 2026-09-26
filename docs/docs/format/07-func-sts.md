@@ -116,24 +116,29 @@ has not yet been confirmed empirically.
 
 `crate::raw::func_sts::FuncSts` parses this file and exposes per-scan
 channel lookups by name; `FuncSts::collision_energy(scan_idx)` reads the
-"Collision Energy" channel specifically. `Reader::open` parses every
-function's `_FUNCnnn.STS` when present (silently `None` if absent or
-malformed - this file is supplementary, not required to decode peak data),
-and `mzml::precursor_info_for` uses it to populate
-`PrecursorInfo::collision_energy` for every MS2 function, including MSe/HDMSe
-(which has no discrete precursor `target_mz` but still reports a real
-per-scan collision energy) and targeted MS/MS (Sigilweaver/OpenWRaw#8, #13).
+"Collision Energy" channel specifically, and
+`FuncSts::etd_fragmentation_mode(scan_idx)` reads the "ETD Fragmentation
+Mode" channel (seq 121) specifically. `Reader::open` parses every function's
+`_FUNCnnn.STS` when present (silently `None` if absent or malformed - this
+file is supplementary, not required to decode peak data), and
+`mzml::precursor_info_for` uses it to populate `PrecursorInfo::collision_energy`
+for every MS2 function, including MSe/HDMSe (which has no discrete precursor
+`target_mz` but still reports a real per-scan collision energy) and targeted
+MS/MS (Sigilweaver/OpenWRaw#8, #13), and to populate `PrecursorInfo::activation`
+from the ETD Fragmentation Mode channel: `0` maps to `Activation::CID`,
+non-zero to `Activation::ETD` (Sigilweaver/OpenWRaw#22). Every ETD
+Fragmentation Mode value seen in the repository corpus is `0`; the non-zero
+branch follows directly from this table's documented encoding but has not
+been exercised against a real non-zero fixture, only synthetically
+(`mzml::tests::activation_for_maps_zero_to_cid_and_nonzero_to_etd`).
 
-Channels 101, 102, and 121 remain available through the generic `channel` /
+Channels 101 and 102 remain available through the generic `channel` /
 `value_at` API but are deliberately not applied downstream. Every sample in
-the repository corpus has `Use lock mass correction = 0`,
-`Lock mass correction = 0.0`, and (where present)
-`ETD Fragmentation Mode = 0`. Consequently the corpus cannot establish how a
-non-zero lock-mass value modifies the calibrated TOF-to-m/z conversion, or
-verify that a non-zero fragmentation-mode value should be emitted as ETD.
-Applying either interpretation would require a fixture with a non-zero value
-and an independently checkable in-repository invariant (Sigilweaver/OpenWRaw#22,
-#23).
+the repository corpus has `Use lock mass correction = 0` and
+`Lock mass correction = 0.0`. Consequently the corpus cannot establish how a
+non-zero lock-mass value modifies the calibrated TOF-to-m/z conversion.
+Applying an interpretation would require a fixture with a non-zero value and
+an independently checkable in-repository invariant (Sigilweaver/OpenWRaw#23).
 
 ## Reference Sources
 

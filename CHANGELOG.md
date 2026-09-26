@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `audit_corpus` example to check every non-lock-mass scan in a corpus and
   fail if any bundle or scan does not decode.
+- Populate `PrecursorInfo::activation` from `_FUNCnnn.STS`'s "ETD
+  Fragmentation Mode" channel (seq 121): `0` maps to CID, non-zero to ETD.
+  No corpus fixture has a non-zero value, so the ETD branch is verified only
+  by a synthetic unit test. Fixes #22. (@Nabejo)
 
 ## [1.2.9] - 2026-08-12
 
