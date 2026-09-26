@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the full 24-bit Variant A record count.
 - Decode additional 6-byte scans with `0x60` sentinels or no sentinel and
   marker-extended TOF bins.
+- Route Python `RawReader` spectrum methods through the core Rust reader so
+  UNIFI exports receive the same file discovery and DAT layout handling.
+  `function_encoding` now reports `"c"` for one-dimensional 8-byte spectra
+  instead of labeling them as IMS.
 
 ### Added
 

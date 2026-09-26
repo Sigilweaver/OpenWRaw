@@ -73,11 +73,11 @@ impl ScanIndex {
                 // At a 330-byte boundary, use the Variant A packed marker and
                 // monotonically increasing DAT offsets to disambiguate.
                 let looks_a = data.chunks_exact(STRIDE_A).all(|rec| {
-                    let packed = u32::from_le_bytes(rec[4..8].try_into().unwrap());
+                    let packed = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
                     packed & 0xff00_0000 == 0x1800_0000
                 }) && data
                     .chunks_exact(STRIDE_A)
-                    .map(|rec| u32::from_le_bytes(rec[..4].try_into().unwrap()))
+                    .map(|rec| u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]))
                     .is_sorted();
                 if looks_a {
                     Ok(ScanIndex::A(parse_variant_a(data)?))

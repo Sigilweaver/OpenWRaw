@@ -599,7 +599,7 @@ mod tests {
         // Scan 3 is the first non-blank scan (scans 0-2 are blank/2-record sentinels).
         let scan3 = &idx[3];
         let scan_bytes = &dat_bytes
-            [scan3.dat_offset as usize..(scan3.dat_offset + scan3.n_records as u32 * 6) as usize];
+            [scan3.dat_offset as usize..(scan3.dat_offset + scan3.n_records * 6) as usize];
         let spec = decode_encoding_a(scan_bytes, &params).unwrap();
 
         assert!(!spec.mz.is_empty(), "scan 3 should have peaks");

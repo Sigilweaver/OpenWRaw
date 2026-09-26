@@ -7,9 +7,24 @@ vendor-derived expected output, which CONTRIBUTING.md's clean-room
 policy rules out.
 """
 
+import os
+
 import pytest
 
 import openwraw
+
+
+def test_unifi_export_uses_core_decoder():
+    path = os.environ.get("OPENWRAW_UNIFI_BUNDLE")
+    if not path:
+        pytest.skip("set OPENWRAW_UNIFI_BUNDLE to a Vion/UNIFI RAW directory")
+    reader = openwraw.RawReader(path)
+    assert reader.functions
+    func = next(f for f in reader.functions if not f.is_lock_mass)
+    assert reader.function_encoding(func.index) == "c"
+    spectrum = reader.read_spectrum(func.index, 0)
+    assert len(spectrum.mz) == len(spectrum.intensity)
+    assert len(spectrum.mz) > 0
 
 
 def test_header(raw_bundle):
@@ -68,7 +83,7 @@ def test_ms_level_and_encoding(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
     for f in r.functions:
         assert r.ms_level(f.index) in (1, 2)
-        assert r.function_encoding(f.index) in ("a", "b")
+        assert r.function_encoding(f.index) in ("a", "b", "c")
 
 
 def test_n_scans_and_retention_time(raw_bundle):

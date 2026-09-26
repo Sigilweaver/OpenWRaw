@@ -4,19 +4,19 @@
 // Exposes a high-level `RawReader` class that opens a Waters .raw directory
 // and provides Python-friendly access to functions, spectra, and chromatograms.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use ::openwraw::raw::{
     chroms::{read_chro_dat, ChromsInf},
-    data::{decode_encoding_a, decode_encoding_b, decode_encoding_c, DecodeParams},
     extern_inf::{ExternInf, Polarity},
     functions_inf::FunctionTable,
     header::Header,
     index::ScanIndex,
 };
+use ::openwraw::{DecodedSpectrum, Encoding, Reader};
 
 // -- Error conversion --
 
@@ -24,8 +24,29 @@ fn to_py_err(e: ::openwraw::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
 }
 
-fn io_to_py(e: std::io::Error) -> PyErr {
-    PyRuntimeError::new_err(format!("{e}"))
+fn find_side_file(dir: &Path, name: &str) -> ::openwraw::Result<Option<PathBuf>> {
+    let wanted = name.to_ascii_uppercase();
+    let mut suffix = None;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let actual = entry.file_name().to_string_lossy().to_ascii_uppercase();
+        if actual == wanted {
+            return Ok(Some(entry.path()));
+        }
+        if actual.ends_with(&wanted) {
+            if suffix.is_some() {
+                return Err(::openwraw::Error::Parse(format!(
+                    "multiple files match {name} in {}",
+                    dir.display()
+                )));
+            }
+            suffix = Some(entry.path());
+        }
+    }
+    Ok(suffix)
 }
 
 // -- RunHeader --
@@ -301,6 +322,7 @@ impl ChromPoint {
 #[pyclass]
 pub struct RawReader {
     raw_dir: PathBuf,
+    reader: Reader,
     header: Header,
     ext: ExternInf,
     funcs: FunctionTable,
@@ -323,12 +345,15 @@ impl RawReader {
             )));
         }
 
-        let header = Header::from_path(&raw_dir.join("_HEADER.TXT")).map_err(to_py_err)?;
-        let ext = ExternInf::from_path(&raw_dir.join("_extern.inf")).map_err(to_py_err)?;
-        let funcs = FunctionTable::from_path(&raw_dir.join("_FUNCTNS.INF")).map_err(to_py_err)?;
+        let reader = Reader::open(&raw_dir).map_err(to_py_err)?;
+        let header = reader.header.clone();
+        let ext = reader.extern_inf.clone();
+        let funcs = FunctionTable {
+            functions: reader.functions.iter().map(|f| f.info.clone()).collect(),
+        };
 
-        let chroms_path = raw_dir.join("_CHROMS.INF");
-        let chroms = if chroms_path.exists() {
+        let chroms_path = find_side_file(&raw_dir, "_CHROMS.INF").map_err(to_py_err)?;
+        let chroms = if let Some(chroms_path) = chroms_path {
             Some(ChromsInf::from_path(&chroms_path).map_err(to_py_err)?)
         } else {
             None
@@ -336,6 +361,7 @@ impl RawReader {
 
         Ok(Self {
             raw_dir,
+            reader,
             header,
             ext,
             funcs,
@@ -408,28 +434,17 @@ impl RawReader {
 
     /// Number of scans in a function (1-based `func_index`).
     fn n_scans(&self, func_index: u32) -> PyResult<usize> {
-        let (idx, _dat) = self.load_idx_dat(func_index)?;
-        Ok(idx.len())
+        Ok(self.function(func_index)?.scan_count())
     }
 
     /// Encoding variant for a function (1-based `func_index`).
     ///
-    /// Returns `"a"` for standard Q-TOF functions (Encoding A) or `"b"` for
-    /// SYNAPT IMS functions (Encoding B). Determines which read method to use:
-    /// `"a"` -> `read_spectrum`, `"b"` -> `read_ims_spectrum`.
+    /// Returns `"a"` or `"c"` for one-dimensional spectra, `"b"` for IMS.
     fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
-        let idx_path = self.raw_dir.join(format!("_FUNC{func_index:03}.IDX"));
-        if !idx_path.exists() {
-            return Err(PyRuntimeError::new_err(format!(
-                "IDX file not found: {}",
-                idx_path.display()
-            )));
-        }
-        let idx_bytes = std::fs::read(&idx_path).map_err(io_to_py)?;
-        let idx = ScanIndex::from_bytes(&idx_bytes).map_err(to_py_err)?;
-        Ok(match idx {
-            ScanIndex::A(_) => "a",
-            ScanIndex::B(_) => "b",
+        Ok(match self.function(func_index)?.encoding {
+            Encoding::A => "a",
+            Encoding::B => "b",
+            Encoding::C => "c",
         })
     }
 
@@ -437,8 +452,7 @@ impl RawReader {
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn retention_time(&self, func_index: u32, scan_index: usize) -> PyResult<f32> {
-        let (idx, _dat) = self.load_idx_dat(func_index)?;
-        match idx {
+        match &self.function(func_index)?.scan_index {
             ScanIndex::A(scans) => scans
                 .get(scan_index)
                 .map(|s| s.retention_time_min)
@@ -458,88 +472,42 @@ impl RawReader {
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn read_spectrum(&self, func_index: u32, scan_index: usize) -> PyResult<Spectrum> {
-        let f = self.get_function(func_index)?;
-        let params = self.make_params(&f, func_index);
-        let (idx, dat) = self.load_idx_dat(func_index)?;
-
-        match idx {
-            ScanIndex::A(scans) => {
-                let scan = scans.get(scan_index).ok_or_else(|| {
-                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
-                })?;
-                let start = scan.dat_offset as usize;
-                let end = start + scan.n_records as usize * 6;
-                if end > dat.len() {
-                    return Err(PyRuntimeError::new_err("scan offset out of DAT bounds"));
-                }
-                let spec = decode_encoding_a(&dat[start..end], &params).map_err(to_py_err)?;
-                Ok(Spectrum {
-                    mz: spec.mz,
-                    intensity: spec.intensity,
-                })
-            }
-            ScanIndex::B(scans) => {
-                let scan = scans.get(scan_index).ok_or_else(|| {
-                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
-                })?;
-                let start = scan.dat_offset as usize;
-                let end = scans
-                    .get(scan_index + 1)
-                    .map(|s| s.dat_offset as usize)
-                    .unwrap_or(dat.len());
-                if end <= start || end > dat.len() {
-                    return Ok(Spectrum {
-                        mz: vec![],
-                        intensity: vec![],
-                    });
-                }
-                let spec = decode_encoding_c(&dat[start..end], &params).map_err(to_py_err)?;
-                Ok(Spectrum {
-                    mz: spec.mz,
-                    intensity: spec.intensity,
-                })
-            }
+        let scan = self
+            .reader
+            .decode_scan(func_index, scan_index)
+            .map_err(to_py_err)?;
+        match scan.spectrum {
+            DecodedSpectrum::Plain(spec) => Ok(Spectrum {
+                mz: spec.mz,
+                intensity: spec.intensity,
+            }),
+            DecodedSpectrum::Ims(spec) => Ok(Spectrum {
+                mz: spec.mz,
+                intensity: spec.intensity,
+            }),
         }
     }
 
     /// Decode a full IMS spectrum (m/z, drift time, intensity) for SYNAPT data.
     ///
-    /// Only valid for Encoding B functions (IDX Variant B).  Returns a
-    /// `RuntimeError` if the function uses Encoding A.
+    /// Only valid for Encoding B functions. Returns a `RuntimeError` for
+    /// one-dimensional functions.
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn read_ims_spectrum(&self, func_index: u32, scan_index: usize) -> PyResult<ImsSpectrum> {
-        let f = self.get_function(func_index)?;
-        let params = self.make_params(&f, func_index);
-        let (idx, dat) = self.load_idx_dat(func_index)?;
-
-        match idx {
-            ScanIndex::A(_) => Err(PyRuntimeError::new_err(
-                "function uses Encoding A (not IMS); use read_spectrum instead",
+        let scan = self
+            .reader
+            .decode_scan(func_index, scan_index)
+            .map_err(to_py_err)?;
+        match scan.spectrum {
+            DecodedSpectrum::Ims(spec) => Ok(ImsSpectrum {
+                mz: spec.mz,
+                drift_time_ms: spec.drift_time_ms,
+                intensity: spec.intensity,
+            }),
+            DecodedSpectrum::Plain(_) => Err(PyRuntimeError::new_err(
+                "function is not IMS; use read_spectrum instead",
             )),
-            ScanIndex::B(scans) => {
-                let scan = scans.get(scan_index).ok_or_else(|| {
-                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
-                })?;
-                let start = scan.dat_offset as usize;
-                let end = scans
-                    .get(scan_index + 1)
-                    .map(|s| s.dat_offset as usize)
-                    .unwrap_or(dat.len());
-                if end <= start || end > dat.len() {
-                    return Ok(ImsSpectrum {
-                        mz: vec![],
-                        drift_time_ms: vec![],
-                        intensity: vec![],
-                    });
-                }
-                let spec = decode_encoding_b(&dat[start..end], &params).map_err(to_py_err)?;
-                Ok(ImsSpectrum {
-                    mz: spec.mz,
-                    drift_time_ms: spec.drift_time_ms,
-                    intensity: spec.intensity,
-                })
-            }
         }
     }
 
@@ -552,7 +520,9 @@ impl RawReader {
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("no _CHROMS.INF in this .raw directory"))?;
         let chro_num = ci.chro_number_for_channel(channel_index);
-        let chro_path = self.raw_dir.join(format!("_CHRO{chro_num:03}.DAT"));
+        let chro_path = find_side_file(&self.raw_dir, &format!("_CHRO{chro_num:03}.DAT"))
+            .map_err(to_py_err)?
+            .ok_or_else(|| PyRuntimeError::new_err(format!("CHRO file {chro_num} not found")))?;
         let points = read_chro_dat(&chro_path).map_err(to_py_err)?;
         Ok(points
             .iter()
@@ -574,58 +544,12 @@ impl RawReader {
 }
 
 impl RawReader {
-    fn get_function(
-        &self,
-        func_index: u32,
-    ) -> PyResult<::openwraw::raw::functions_inf::FunctionInfo> {
-        self.funcs
+    fn function(&self, func_index: u32) -> PyResult<&::openwraw::FunctionEntry> {
+        self.reader
             .functions
             .iter()
             .find(|f| f.index == func_index)
-            .cloned()
             .ok_or_else(|| PyRuntimeError::new_err(format!("function {func_index} not found")))
-    }
-
-    fn make_params(
-        &self,
-        f: &::openwraw::raw::functions_inf::FunctionInfo,
-        func_index: u32,
-    ) -> DecodeParams {
-        DecodeParams {
-            a_us: self.ext.a_us(),
-            cal: self
-                .header
-                .cal_functions
-                .get(&func_index)
-                .cloned()
-                .unwrap_or_default(),
-            mz_low: f.mz_low as f64,
-            mz_high: f.mz_high as f64,
-            scan_time_ms: f.scan_time_s as f64 * 1000.0,
-        }
-    }
-
-    fn load_idx_dat(&self, func_index: u32) -> PyResult<(ScanIndex, Vec<u8>)> {
-        let idx_path = self.raw_dir.join(format!("_FUNC{func_index:03}.IDX"));
-        let dat_path = self.raw_dir.join(format!("_FUNC{func_index:03}.DAT"));
-
-        if !idx_path.exists() {
-            return Err(PyRuntimeError::new_err(format!(
-                "IDX file not found: {}",
-                idx_path.display()
-            )));
-        }
-        if !dat_path.exists() {
-            return Err(PyRuntimeError::new_err(format!(
-                "DAT file not found: {}",
-                dat_path.display()
-            )));
-        }
-
-        let idx_bytes = std::fs::read(&idx_path).map_err(io_to_py)?;
-        let dat = std::fs::read(&dat_path).map_err(io_to_py)?;
-        let idx = ScanIndex::from_bytes(&idx_bytes).map_err(to_py_err)?;
-        Ok((idx, dat))
     }
 }
 
