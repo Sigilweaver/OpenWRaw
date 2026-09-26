@@ -218,7 +218,7 @@ impl Reader {
 
 /// MassLynx exports may lowercase names or prefix every side file with a
 /// sample identifier. Prefer an exact case-insensitive name before a suffix.
-fn find_file(dir: &Path, name: &str) -> crate::Result<Option<PathBuf>> {
+pub(crate) fn find_file(dir: &Path, name: &str) -> crate::Result<Option<PathBuf>> {
     let wanted = name.to_ascii_uppercase();
     let mut suffix = None;
     for entry in fs::read_dir(dir)? {

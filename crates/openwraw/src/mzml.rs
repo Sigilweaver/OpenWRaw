@@ -21,7 +21,7 @@ use openmassspec_core as msc;
 
 use crate::raw::chroms::{read_chro_dat, ChromsInf};
 use crate::raw::data::ImsSpectrum;
-use crate::reader::{DecodedScan, DecodedSpectrum, Reader};
+use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
 const SOFTWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -320,10 +320,9 @@ fn chromatogram_type_for_units(units: &str) -> Option<msc::CvTerm> {
 /// skipped rather than aborting the whole run, matching `iter_spectra`'s
 /// skip-on-decode-failure contract.
 fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
-    let inf_path = dir.join("_CHROMS.INF");
-    if !inf_path.exists() {
+    let Some(inf_path) = find_file(dir, "_CHROMS.INF").ok().flatten() else {
         return Vec::new();
-    }
+    };
     let Ok(inf) = ChromsInf::from_path(&inf_path) else {
         return Vec::new();
     };
@@ -334,7 +333,12 @@ fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
             continue;
         };
         let chro_num = inf.chro_number_for_channel(ch.index);
-        let dat_path = dir.join(format!("_CHRO{chro_num:03}.DAT"));
+        let Some(dat_path) = find_file(dir, &format!("_CHRO{chro_num:03}.DAT"))
+            .ok()
+            .flatten()
+        else {
+            continue;
+        };
         let Ok(points) = read_chro_dat(&dat_path) else {
             continue;
         };
@@ -713,7 +717,7 @@ mod tests {
         // Channel 1: composition % (no CV term) -> _CHRO004.DAT, should be skipped
         inf.extend(make_data(4, "BSM Composition B", "$CC$,1.0,3,0,0,%"));
 
-        std::fs::write(dir.join("_CHROMS.INF"), &inf).unwrap();
+        std::fs::write(dir.join("_chroms.inf"), &inf).unwrap();
 
         let make_chro_dat = |points: &[(f32, f32)]| {
             let mut bytes = vec![0u8; 128];
@@ -728,12 +732,12 @@ mod tests {
             bytes
         };
         std::fs::write(
-            dir.join("_CHRO003.DAT"),
+            dir.join("_chro003.dat"),
             make_chro_dat(&[(0.0, 100.0), (0.5, 200.0)]),
         )
         .unwrap();
         std::fs::write(
-            dir.join("_CHRO004.DAT"),
+            dir.join("_chro004.dat"),
             make_chro_dat(&[(0.0, 95.0), (0.5, 96.0)]),
         )
         .unwrap();
