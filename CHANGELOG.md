@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0-beta.1] - 2026-09-26
+## [2.0.0] - 2026-09-26
 
-Beta for the Waters decoder rework in #33. Encodings A and D now decode to
-lock-mass-checked m/z; Encodings B and C (30-byte index files: SYNAPT
-G2-S/G2-Si/XS IMS and Xevo) are unchanged and do not yet pass the lock-mass
-check. See `CORPUS-AUDIT.md`.
+Major release for the Waters decoder rework in #33. Encodings A and D now
+decode m/z from floating-point words, with lock-mass validation across the
+expanded corpus. Encodings B and C (30-byte index files: SYNAPT G2-S/G2-Si/XS
+IMS and Xevo) are unchanged and do not yet pass the lock-mass check. See
+`CORPUS-AUDIT.md` for the measured limits.
 
 ### Breaking
 
