@@ -73,11 +73,24 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
+## Corpus decode audit
+
+Run every non-lock-mass scan in a directory tree of Waters RAW bundles:
+
+```sh
+cargo run -p openwraw --release --example audit_corpus -- /path/to/corpus
+```
+
+The command reports opened bundles, decoded scans, and the first error per
+bundle. It exits with an error if any bundle fails to open or any scan fails
+to decode. This checks decoder execution; independent mass-accuracy
+validation requires reference spectra.
+
 ## Repository layout
 
 ```
 crates/
-  openwraw/      Core Rust library (96 tests)
+  openwraw/      Core Rust library
   openwraw-py/   PyO3 / maturin Python bindings
 docs/            Docusaurus site (format spec + guides)
 ```

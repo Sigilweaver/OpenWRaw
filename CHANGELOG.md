@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Open Vion/UNIFI exports and other bundles that omit pusher timing in
+  `_extern.inf`. Recognize the spaced `Pusher Interval` spelling used by
+  older QTof files. The public Rust `ExternInf::pusher_interval_us` field and
+  `pusher_interval_for` method now return `Option<f64>` so absence remains
+  explicit.
+- Discover lowercase and sample-prefixed RAW side files, including
+  chromatogram files.
+- Select 6-byte or 8-byte DAT records independently of IDX stride. Resolve
+  ambiguous 22-byte versus 30-byte IDX files from record markers, and read
+  the full 24-bit Variant A record count.
+- Decode additional 6-byte scans with `0x60` sentinels or no sentinel and
+  marker-extended TOF bins.
+
+### Added
+
+- `audit_corpus` example to check every non-lock-mass scan in a corpus and
+  fail if any bundle or scan does not decode.
+
 ## [1.2.9] - 2026-08-12
 
 ### Changed
