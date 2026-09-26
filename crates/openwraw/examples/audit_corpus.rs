@@ -41,6 +41,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .ok_or("expected a corpus directory")?;
     let paths = bundles(&root)?;
+    if paths.is_empty() {
+        return Err(format!("no RAW bundles found under {}", root.display()).into());
+    }
     let mut complete = 0usize;
     let mut opened_scans = 0usize;
     let mut decoded_scans = 0usize;
@@ -69,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 opened_scans += total;
                 decoded_scans += decoded;
-                if decoded == total {
+                if total > 0 && decoded == total {
                     complete += 1;
                 }
                 println!(
