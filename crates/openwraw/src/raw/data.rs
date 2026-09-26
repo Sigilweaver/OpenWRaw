@@ -45,6 +45,10 @@ pub struct ImsSpectrum {
 /// Byte marker for an Encoding A sentinel record.
 const ENC_A_SENTINEL: u8 = 0x70;
 
+fn is_enc_a_sentinel(marker: u8) -> bool {
+    marker == 0x60 || marker == ENC_A_SENTINEL
+}
+
 /// Decode one scan slice from an Encoding A `_FUNCnnn.DAT` file.
 ///
 /// `scan_bytes` must be the exact bytes of one scan as given by the paired
@@ -65,12 +69,11 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
 
     let n = scan_bytes.len() / 6;
 
-    // First record must be the sentinel.
-    if scan_bytes[2] != ENC_A_SENTINEL {
-        return Err(crate::Error::Parse(format!(
-            "Encoding A: first record block_type {:#04x} is not sentinel ({:#04x})",
-            scan_bytes[2], ENC_A_SENTINEL
-        )));
+    // Later QTof acquisitions omit the 0x70 sentinel. Their block marker
+    // extends the TOF bin across 32,768-bin pages; the first and last records
+    // anchor the declared mass range, as in the eight-byte format.
+    if !is_enc_a_sentinel(scan_bytes[2]) {
+        return decode_encoding_a_unanchored(scan_bytes, params);
     }
     let sentinel_tof_bin = read_u16_le(scan_bytes, 4)? as f64;
     if sentinel_tof_bin == 0.0 {
@@ -95,7 +98,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         let raw_intensity = rec[3];
         let tof_bin = read_u16_le(rec, 4)? as f64;
 
-        if block_type == ENC_A_SENTINEL || raw_intensity == 0 {
+        if is_enc_a_sentinel(block_type) || raw_intensity == 0 {
             continue;
         }
 
@@ -105,6 +108,50 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         out.intensity.push(raw_intensity as f32);
     }
 
+    Ok(out)
+}
+
+fn encoding_a_full_bin(rec: &[u8]) -> crate::Result<f64> {
+    let marker = rec[2];
+    if !(0x80..=0xb0).contains(&marker) || marker & 0x0f != 0 {
+        return Err(crate::Error::Parse(format!(
+            "Encoding A: unsupported record marker {marker:#04x}"
+        )));
+    }
+    let page = (i32::from(marker) - 0x90) / 0x10;
+    Ok(f64::from(read_u16_le(rec, 4)?) + f64::from(page * 32768))
+}
+
+fn decode_encoding_a_unanchored(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
+    let n = scan_bytes.len() / 6;
+    if n < 2 {
+        return Ok(Spectrum::default());
+    }
+    let bin_low = encoding_a_full_bin(&scan_bytes[..6])?;
+    let bin_high = encoding_a_full_bin(&scan_bytes[(n - 1) * 6..])?;
+    if bin_high <= bin_low {
+        return Err(crate::Error::Parse(format!(
+            "Encoding A: non-increasing TOF anchors {bin_low} and {bin_high}"
+        )));
+    }
+    let t_low = params.a_us * params.mz_low.sqrt();
+    let t_high = params.a_us * params.mz_high.sqrt();
+    let t_bin = (t_high - t_low) / (bin_high - bin_low);
+    let mut out = Spectrum {
+        mz: Vec::with_capacity(n),
+        intensity: Vec::with_capacity(n),
+    };
+    for rec in scan_bytes.chunks_exact(6) {
+        let intensity = rec[3];
+        if intensity == 0 {
+            continue;
+        }
+        let bin = encoding_a_full_bin(rec)?;
+        let t_raw = t_low + (bin - bin_low) * t_bin;
+        let t_cal = params.cal.apply(t_raw);
+        out.mz.push((t_cal / params.a_us).powi(2));
+        out.intensity.push(f32::from(intensity));
+    }
     Ok(out)
 }
 
@@ -319,6 +366,15 @@ mod tests {
     }
 
     #[test]
+    fn enc_a_accepts_older_sixty_sentinel() {
+        let mut sentinel = enc_a_sentinel(10000);
+        sentinel[2] = 0x60;
+        let scan = bytes_of(&[sentinel, enc_a_data(0x80, 42, 6000)]);
+        let spec = decode_encoding_a(&scan, &test_params()).unwrap();
+        assert_eq!(spec.intensity, vec![42.0]);
+    }
+
+    #[test]
     fn enc_a_skips_zero_intensity() {
         let scan = bytes_of(&[
             enc_a_sentinel(10000),
@@ -344,9 +400,24 @@ mod tests {
 
     #[test]
     fn enc_a_bad_first_record_is_error() {
-        // First record has block_type=0x80 (not sentinel)
-        let scan = bytes_of(&[enc_a_data(0x80, 10, 5000)]);
+        let scan = bytes_of(&[enc_a_data(0x00, 10, 5000), enc_a_data(0x90, 10, 6000)]);
         assert!(decode_encoding_a(&scan, &test_params()).is_err());
+    }
+
+    #[test]
+    fn enc_a_without_sentinel_uses_marker_pages_and_mass_range() {
+        // 0x90: bin 40000; 0xA0: bin 32768+32768=65536;
+        // 0xB0: bin 40000+65536=105536.
+        let scan = bytes_of(&[
+            enc_a_data(0x90, 10, 40000),
+            enc_a_data(0xa0, 20, 32768),
+            enc_a_data(0xb0, 30, 40000),
+        ]);
+        let spec = decode_encoding_a(&scan, &test_params()).unwrap();
+        assert_eq!(spec.intensity, vec![10.0, 20.0, 30.0]);
+        assert!((spec.mz[0] - 4.0).abs() < 1e-8);
+        assert!((spec.mz[2] - 100.0).abs() < 1e-8);
+        assert!(spec.mz.windows(2).all(|x| x[0] < x[1]));
     }
 
     #[test]
