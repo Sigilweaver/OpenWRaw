@@ -355,7 +355,9 @@ impl RawReader {
 
         let chroms_path = find_side_file(&raw_dir, "_CHROMS.INF").map_err(to_py_err)?;
         let chroms = if let Some(chroms_path) = chroms_path {
-            Some(ChromsInf::from_path(&chroms_path).map_err(to_py_err)?)
+            Some(ChromsInf::from_path(&chroms_path).map_err(|e| {
+                PyRuntimeError::new_err(format!("reading {}: {e}", chroms_path.display()))
+            })?)
         } else {
             None
         };
@@ -524,7 +526,9 @@ impl RawReader {
         let chro_path = find_side_file(&self.raw_dir, &format!("_CHRO{chro_num:03}.DAT"))
             .map_err(to_py_err)?
             .ok_or_else(|| PyRuntimeError::new_err(format!("CHRO file {chro_num} not found")))?;
-        let points = read_chro_dat(&chro_path).map_err(to_py_err)?;
+        let points = read_chro_dat(&chro_path).map_err(|e| {
+            PyRuntimeError::new_err(format!("reading {}: {e}", chro_path.display()))
+        })?;
         Ok(points
             .iter()
             .map(|p| ChromPoint {

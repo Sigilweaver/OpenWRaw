@@ -14,6 +14,21 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("{context}: {source}")]
+    Context {
+        context: String,
+        #[source]
+        source: Box<Error>,
+    },
+}
+
+impl Error {
+    pub(crate) fn with_context(self, context: impl Into<String>) -> Self {
+        Self::Context {
+            context: context.into(),
+            source: Box::new(self),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

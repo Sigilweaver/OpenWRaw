@@ -96,9 +96,15 @@ impl Reader {
     /// Open a `.raw/` bundle directory and parse every required side file.
     pub fn open<P: AsRef<Path>>(dir: P) -> crate::Result<Self> {
         let dir = dir.as_ref().to_path_buf();
-        let header = Header::from_path(&required_file(&dir, "_HEADER.TXT")?)?;
-        let extern_inf = ExternInf::from_path(&required_file(&dir, "_extern.inf")?)?;
-        let func_table = FunctionTable::from_path(&required_file(&dir, "_FUNCTNS.INF")?)?;
+        let header_path = required_file(&dir, "_HEADER.TXT")?;
+        let header = Header::from_path(&header_path)
+            .map_err(|e| e.with_context(format!("reading {}", header_path.display())))?;
+        let extern_path = required_file(&dir, "_extern.inf")?;
+        let extern_inf = ExternInf::from_path(&extern_path)
+            .map_err(|e| e.with_context(format!("reading {}", extern_path.display())))?;
+        let functions_path = required_file(&dir, "_FUNCTNS.INF")?;
+        let func_table = FunctionTable::from_path(&functions_path)
+            .map_err(|e| e.with_context(format!("reading {}", functions_path.display())))?;
 
         let instrument = header.instrument.clone().unwrap_or_default();
         let is_synapt = instrument.to_ascii_uppercase().starts_with("SYNAPT");
@@ -112,7 +118,8 @@ impl Reader {
             else {
                 continue;
             };
-            let scan_index = ScanIndex::from_path(&idx_path)?;
+            let scan_index = ScanIndex::from_path(&idx_path)
+                .map_err(|e| e.with_context(format!("reading {}", idx_path.display())))?;
             let dat_size = fs::metadata(&dat_path)?.len();
             let encoding = match &scan_index {
                 ScanIndex::A(records) => match variant_a_record_width(records) {
@@ -174,6 +181,20 @@ impl Reader {
 
     /// Decode the `i`-th scan (0-based) of the given function.
     pub fn decode_scan(&self, function_index: u32, scan_idx: usize) -> crate::Result<DecodedScan> {
+        self.decode_scan_inner(function_index, scan_idx)
+            .map_err(|e| {
+                e.with_context(format!(
+                    "{} function {function_index} scan {scan_idx}",
+                    self.dir.display()
+                ))
+            })
+    }
+
+    fn decode_scan_inner(
+        &self,
+        function_index: u32,
+        scan_idx: usize,
+    ) -> crate::Result<DecodedScan> {
         let entry = self
             .functions
             .iter()
@@ -549,5 +570,19 @@ mod tests {
         ];
         let entry = entry_with(ScanIndex::A(records), 30);
         assert_eq!(scan_slice(&entry, 0).unwrap().1, 24);
+    }
+
+    #[test]
+    fn decode_error_identifies_bundle_function_and_scan() {
+        let reader = Reader {
+            dir: PathBuf::from("example.raw"),
+            bundle_name: "example.raw".into(),
+            header: Header::default(),
+            extern_inf: "Lteff 2200\nVeff 5000".parse().unwrap(),
+            functions: Vec::new(),
+        };
+        let error = reader.decode_scan(4, 7).unwrap_err().to_string();
+        assert!(error.contains("example.raw function 4 scan 7"));
+        assert!(error.contains("function 4 not present"));
     }
 }
