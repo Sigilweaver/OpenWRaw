@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.1] - 2026-09-26
+
+Beta for the Waters decoder rework in #33. Encodings A and D now decode to
+lock-mass-checked m/z; Encodings B and C (30-byte index files: SYNAPT
+G2-S/G2-Si/XS IMS and Xevo) are unchanged and do not yet pass the lock-mass
+check. See `CORPUS-AUDIT.md`.
+
+### Breaking
+
+- `ExternInf::pusher_interval_us` and `ExternInf::pusher_interval_for`
+  return `Option<f64>`.
+- `ScanIndexA::n_records` is `u32` (full 24-bit count).
+- `Encoding` has a new `D` variant; exhaustive matches must handle it.
+  Python `function_encoding` can return `"d"`.
+- `DecodedScan` has a new public field `etd_fragmentation_mode`.
+- Decoded m/z and intensity change for Encoding A files and for 8-byte
+  files behind a 22-byte index, which previously used Encoding B or C.
+
 ### Fixed
 
 - Open Vion/UNIFI exports and other bundles that omit pusher timing in
