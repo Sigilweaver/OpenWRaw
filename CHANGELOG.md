@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Debug logging through the `log` facade: resolved side files, instrument
+  geometry, per-function encoding choice with its reason, calibration, and
+  scan counts at debug level; skipped functions, missing calibration,
+  unreadable STS files, and index/DAT size mismatches at warn level;
+  per-scan byte ranges at trace level. The Python module forwards these to
+  `logging` under the `openwraw` logger.
+- Opening a missing or unreadable bundle directory now names the path.
 - `audit_corpus` example to check every non-lock-mass scan in a corpus and
   fail if any bundle or scan does not decode, then check m/z accuracy on
   lock-mass functions against the file's `ReferenceMass1` or the standard

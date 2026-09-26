@@ -99,6 +99,7 @@ impl Reader {
     /// Open a `.raw/` bundle directory and parse every required side file.
     pub fn open<P: AsRef<Path>>(dir: P) -> crate::Result<Self> {
         let dir = dir.as_ref().to_path_buf();
+        log::debug!("opening {}", dir.display());
         let header_path = required_file(&dir, "_HEADER.TXT")?;
         let header = Header::from_path(&header_path)
             .map_err(|e| e.with_context(format!("reading {}", header_path.display())))?;
@@ -111,6 +112,17 @@ impl Reader {
 
         let instrument = header.instrument.clone().unwrap_or_default();
         let is_synapt = instrument.to_ascii_uppercase().starts_with("SYNAPT");
+        log::debug!(
+            "instrument {instrument:?}; Lteff {} mm, Veff {} V, pusher interval {}; \
+             {} functions in _FUNCTNS.INF; T1 calibration for functions {:?}",
+            extern_inf.lteff_mm,
+            extern_inf.veff_v,
+            extern_inf
+                .pusher_interval_us
+                .map_or("absent".to_owned(), |us| format!("{us} us")),
+            func_table.functions.len(),
+            header.cal_functions.keys().collect::<Vec<_>>(),
+        );
 
         let mut functions: Vec<FunctionEntry> = Vec::new();
         for info in &func_table.functions {
@@ -119,32 +131,90 @@ impl Reader {
             let (Some(idx_path), Some(dat_path)) =
                 (find_file(&dir, &idx_name)?, find_file(&dir, &dat_name)?)
             else {
+                log::warn!(
+                    "function {}: {idx_name} or {dat_name} missing in {}; skipping function",
+                    info.index,
+                    dir.display()
+                );
                 continue;
             };
             let scan_index = ScanIndex::from_path(&idx_path)
                 .map_err(|e| e.with_context(format!("reading {}", idx_path.display())))?;
             let dat_size = fs::metadata(&dat_path)?.len();
-            let encoding = match &scan_index {
+            let (encoding, reason) = match &scan_index {
                 ScanIndex::A(records) => match variant_a_record_width(records) {
-                    Some(8) => Encoding::D,
-                    _ => Encoding::A,
+                    Some(8) => (Encoding::D, "22-byte index, 8-byte records".to_owned()),
+                    Some(_) => (Encoding::A, "22-byte index, 6-byte records".to_owned()),
+                    None => (
+                        Encoding::A,
+                        "22-byte index, record width not established from offsets; \
+                         assuming 6-byte records"
+                            .to_owned(),
+                    ),
                 },
-                ScanIndex::B(_) => {
-                    if is_synapt {
-                        Encoding::B
-                    } else {
-                        Encoding::C
-                    }
+                ScanIndex::B(_) if is_synapt => (
+                    Encoding::B,
+                    format!("30-byte index, instrument {instrument:?} starts with SYNAPT"),
+                ),
+                ScanIndex::B(_) => (
+                    Encoding::C,
+                    format!("30-byte index, instrument {instrument:?} is not SYNAPT"),
+                ),
+            };
+            let cal = match header.cal_functions.get(&info.index) {
+                Some(cal) => cal.clone(),
+                None => {
+                    log::warn!(
+                        "function {}: no Cal Function line in _HEADER.TXT; m/z is uncalibrated",
+                        info.index
+                    );
+                    FunctionCal::default()
                 }
             };
-            let cal = header
-                .cal_functions
-                .get(&info.index)
-                .cloned()
-                .unwrap_or_default();
 
-            let sts = find_file(&dir, &format!("_FUNC{:03}.STS", info.index))?
-                .and_then(|path| FuncSts::from_path(&path).ok());
+            let sts = match find_file(&dir, &format!("_FUNC{:03}.STS", info.index))? {
+                None => {
+                    log::debug!("function {}: no STS file", info.index);
+                    None
+                }
+                Some(path) => match FuncSts::from_path(&path) {
+                    Ok(sts) => Some(sts),
+                    Err(e) => {
+                        log::warn!(
+                            "function {}: ignoring unreadable {}: {e}",
+                            info.index,
+                            path.display()
+                        );
+                        None
+                    }
+                },
+            };
+
+            if let Some(end) = index_end(&scan_index, encoding) {
+                if end > dat_size {
+                    log::warn!(
+                        "function {}: index addresses {end} bytes but {} is {dat_size} bytes",
+                        info.index,
+                        dat_path.display()
+                    );
+                }
+            }
+            log::debug!(
+                "function {}: {} scans, m/z {}-{}, subtype {:#04x}{}, encoding {encoding:?} \
+                 ({reason}), calibration {:?} with {} coefficients, DAT {dat_size} bytes",
+                info.index,
+                scan_index.len(),
+                info.mz_low,
+                info.mz_high,
+                info.scan_subtype,
+                if info.is_lock_mass() {
+                    " (lock mass)"
+                } else {
+                    ""
+                },
+                cal.cal_type,
+                cal.coeffs.len(),
+            );
 
             functions.push(FunctionEntry {
                 index: info.index,
@@ -162,6 +232,11 @@ impl Reader {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "bundle.raw".into());
+        log::debug!(
+            "opened {bundle_name}: {} of {} functions readable",
+            functions.len(),
+            func_table.functions.len()
+        );
 
         Ok(Reader {
             dir,
@@ -205,6 +280,12 @@ impl Reader {
                 crate::Error::Parse(format!("function {function_index} not present in bundle"))
             })?;
         let (offset, length, rt_min) = scan_slice(entry, scan_idx)?;
+        log::trace!(
+            "function {function_index} scan {scan_idx}: {:?} bytes {offset}..{} of {}, RT {rt_min} min",
+            entry.encoding,
+            offset + length,
+            entry.dat_path.display()
+        );
         let bytes = read_slice(&entry.dat_path, offset, length)?;
         let params = entry.decode_params(&self.extern_inf);
         let decoded = match entry.encoding {
@@ -250,13 +331,18 @@ impl Reader {
 pub(crate) fn find_file(dir: &Path, name: &str) -> crate::Result<Option<PathBuf>> {
     let wanted = name.to_ascii_uppercase();
     let mut suffix = None;
-    for entry in fs::read_dir(dir)? {
+    let entries = fs::read_dir(dir)
+        .map_err(|e| crate::Error::from(e).with_context(format!("listing {}", dir.display())))?;
+    for entry in entries {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
             continue;
         }
         let actual = entry.file_name().to_string_lossy().to_ascii_uppercase();
         if actual == wanted {
+            if entry.file_name().to_string_lossy() != name {
+                log::trace!("{name}: using differently cased {}", entry.path().display());
+            }
             return Ok(Some(entry.path()));
         }
         if actual.ends_with(&wanted) {
@@ -269,7 +355,27 @@ pub(crate) fn find_file(dir: &Path, name: &str) -> crate::Result<Option<PathBuf>
             suffix = Some(entry.path());
         }
     }
+    if let Some(path) = &suffix {
+        log::debug!("{name}: using prefixed {}", path.display());
+    }
     Ok(suffix)
+}
+
+/// Byte offset one past the last scan the index addresses, when the index
+/// records it directly (Variant A counts; Variant B's last scan runs to EOF).
+fn index_end(scan_index: &ScanIndex, encoding: Encoding) -> Option<u64> {
+    let ScanIndex::A(records) = scan_index else {
+        return None;
+    };
+    let width = if matches!(encoding, Encoding::A) {
+        6
+    } else {
+        8
+    };
+    records
+        .iter()
+        .map(|r| u64::from(r.dat_offset) + u64::from(r.n_records) * width)
+        .max()
 }
 
 fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
@@ -545,6 +651,14 @@ mod tests {
         entry.encoding = Encoding::D;
         assert_eq!(scan_slice(&entry, 0).unwrap().1, 40);
         assert_eq!(scan_slice(&entry, 1).unwrap().1, 16);
+    }
+
+    #[test]
+    fn open_missing_directory_names_the_path() {
+        let error = Reader::open("/nonexistent/example.raw")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("/nonexistent/example.raw"), "{error}");
     }
 
     #[test]

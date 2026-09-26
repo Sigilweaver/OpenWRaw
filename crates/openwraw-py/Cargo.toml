@@ -23,3 +23,4 @@ unsafe_code = "forbid"
 [dependencies]
 openwraw.workspace = true
 pyo3 = { workspace = true }
+pyo3-log = { workspace = true }

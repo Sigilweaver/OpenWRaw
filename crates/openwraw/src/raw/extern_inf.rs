@@ -285,6 +285,9 @@ impl std::str::FromStr for ExternInf {
         // This field is absent in UNIFI exports and is not needed by the
         // current DAT decoders. Preserve absence instead of inventing a value.
         let pusher_interval_us = pusher_from_interval.or(pusher_from_cycle);
+        if pusher_interval_us.is_none() {
+            log::debug!("_extern.inf: no numeric PusherInterval or Pusher Cycle Time");
+        }
 
         Ok(ExternInf {
             lteff_mm,

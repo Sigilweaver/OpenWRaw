@@ -79,6 +79,14 @@ impl ScanIndex {
                     .chunks_exact(STRIDE_A)
                     .map(|rec| u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]))
                     .is_sorted();
+                log::debug!(
+                    "_FUNCnnn.IDX: {len} bytes fits both strides; record markers select {}",
+                    if looks_a {
+                        "22-byte Variant A"
+                    } else {
+                        "30-byte Variant B"
+                    }
+                );
                 if looks_a {
                     Ok(ScanIndex::A(parse_variant_a(data)?))
                 } else {

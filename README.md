@@ -73,6 +73,35 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
+## Debug logging
+
+OpenWRaw logs how it reads a bundle: which side files it resolved
+(including sample-prefixed names), instrument and geometry from
+`_extern.inf`, and for each function the scan count, mass range, chosen
+record encoding and why, and calibration. Warnings flag skipped functions,
+missing calibration, unreadable `_FUNCnnn.STS` files, and indexes that
+address more bytes than their DAT file holds. Per-scan byte ranges are
+logged at trace level.
+
+Rust uses the [`log`](https://docs.rs/log) facade; install any logger:
+
+```sh
+RUST_LOG=openwraw=debug your-program sample.raw   # with env_logger
+```
+
+Python forwards to the standard `logging` module under the `openwraw`
+logger. Configure it before opening files:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+import openwraw
+openwraw.RawReader("sample.raw")
+```
+
+Include this output when reporting a file that fails to open or decode.
+
 ## Corpus decode audit
 
 Run every non-lock-mass scan in a directory tree of Waters RAW bundles:

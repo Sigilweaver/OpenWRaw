@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 openmassspec-core = { workspace = true }
+log = { workspace = true }
 thiserror = "2"
 
 [dev-dependencies]

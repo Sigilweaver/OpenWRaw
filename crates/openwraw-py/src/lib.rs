@@ -563,6 +563,11 @@ impl RawReader {
 
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Forward Rust `log` records to Python `logging` under the "openwraw"
+    // logger hierarchy. Records below the configured Python level are
+    // dropped cheaply; configure logging before opening files, since levels
+    // are cached per logger.
+    pyo3_log::init();
     m.add_class::<RawReader>()?;
     m.add_class::<RunHeader>()?;
     m.add_class::<FunctionInfo>()?;
