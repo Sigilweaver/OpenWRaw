@@ -348,9 +348,10 @@ impl RawReader {
         let reader = Reader::open(&raw_dir).map_err(to_py_err)?;
         let header = reader.header.clone();
         let ext = reader.extern_inf.clone();
-        let funcs = FunctionTable {
-            functions: reader.functions.iter().map(|f| f.info.clone()).collect(),
-        };
+        let funcs_path = find_side_file(&raw_dir, "_FUNCTNS.INF")
+            .map_err(to_py_err)?
+            .ok_or_else(|| PyRuntimeError::new_err("_FUNCTNS.INF not found"))?;
+        let funcs = FunctionTable::from_path(&funcs_path).map_err(to_py_err)?;
 
         let chroms_path = find_side_file(&raw_dir, "_CHROMS.INF").map_err(to_py_err)?;
         let chroms = if let Some(chroms_path) = chroms_path {
