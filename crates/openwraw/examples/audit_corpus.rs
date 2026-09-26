@@ -2,6 +2,7 @@
 //!
 //! Usage: cargo run -p openwraw --release --example audit_corpus -- /path/to/corpus
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use openwraw::{DecodedSpectrum, Reader};
@@ -78,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        std::io::stdout().flush()?;
     }
     println!(
         "SUMMARY bundles={} complete={} opened_scans={} decoded_scans={}",
