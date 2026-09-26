@@ -82,9 +82,11 @@ cargo run -p openwraw --release --example audit_corpus -- /path/to/corpus
 ```
 
 The command reports opened bundles, decoded scans, and the first error per
-bundle. It exits with an error if any bundle fails to open or any scan fails
-to decode. This checks decoder execution; independent mass-accuracy
-validation requires reference spectra.
+bundle, then checks each lock-mass function against its reference compound
+(`ReferenceMass1` in `_extern.inf`, or Leu-Enk / Glu-fib). It exits with an
+error if any bundle fails to open, any scan fails to decode, or any lock-mass
+function is more than 100 ppm off. Add `--lock-only` to skip the full scan
+pass.
 
 The [2026-09-26 corpus audit](CORPUS-AUDIT.md) records the expanded
 corpus results and the format gaps it exposed.
