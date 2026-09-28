@@ -138,3 +138,32 @@ def test_read_chrom(raw_bundle):
 def test_repr(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
     assert "RawReader(" in repr(r)
+
+
+def test_canonical_records_and_decoded_metadata(raw_bundle):
+    r = openwraw.RawReader(str(raw_bundle))
+    run = r.run_info()
+    assert run["source_file_name"] == raw_bundle.name
+    assert run["source_file_format"]["accession"]
+    assert isinstance(r.header.calibrations, dict)
+    params = r.instrument_parameters()
+    assert isinstance(params["functions"], dict)
+    assert isinstance(params["lteff_mm"], float)
+
+    first = next(f for f in r.functions if not f.is_lock_mass)
+    record = r.read_record(first.index, 0)
+    streamed = next(r.iter_records())
+    assert record == streamed
+    assert len(record["mz"]) == len(record["intensity"])
+    assert record["native_id"]
+    scan_params = r.scan_parameters(first.index, 0)
+    assert {"collision_energy_ev", "etd_fragmentation_mode"} <= scan_params.keys()
+    channels = r.scan_channels(first.index, 0)
+    assert isinstance(channels, dict)
+    assert all(isinstance(row["name"], str) for row in r.channel_descriptors(first.index))
+    index = r.index_record(first.index, 0)
+    assert index["dat_offset"] >= 0
+    assert index["retention_time_min"] >= 0
+
+    for chrom in r.read_chromatograms():
+        assert len(chrom["time_sec"]) == len(chrom["intensity"])

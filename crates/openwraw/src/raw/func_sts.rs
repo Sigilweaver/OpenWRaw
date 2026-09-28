@@ -139,6 +139,11 @@ impl FuncSts {
         self.n_scans
     }
 
+    /// All decoded channel descriptors in source order.
+    pub fn channels(&self) -> &[ChannelDescriptor] {
+        &self.descriptors
+    }
+
     /// Look up a channel descriptor by exact (trimmed) name.
     pub fn channel(&self, name: &str) -> Option<&ChannelDescriptor> {
         self.descriptors.iter().find(|d| d.name == name)

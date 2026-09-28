@@ -5,9 +5,15 @@
 // and provides Python-friendly access to functions, spectra, and chromatograms.
 
 use std::path::{Path, PathBuf};
+use std::sync::{
+    mpsc::{sync_channel, Receiver},
+    Mutex,
+};
 
+use openmassspec_core::{SpectrumRecord, SpectrumSource};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use ::openwraw::raw::{
     chroms::{read_chro_dat, ChromsInf},
@@ -22,6 +28,126 @@ use ::openwraw::{DecodedSpectrum, Encoding, Reader};
 
 fn to_py_err(e: ::openwraw::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
+}
+
+/// Spectrum record as a dict. `total_ion_current` and `base_peak_*` carry the
+/// effective values, matching `openmassspec_io.Spectrum`; the vendor-reported
+/// values stay under `reported_*`. Peak arrays bypass JSON, which would turn
+/// NaN into `None` and is slow for large spectra.
+fn record_object(py: Python<'_>, mut rec: SpectrumRecord) -> PyResult<Py<PyAny>> {
+    let tic = rec.effective_tic();
+    let base_peak = rec.effective_base_peak();
+    let mz = std::mem::take(&mut rec.mz);
+    let intensity = std::mem::take(&mut rec.intensity);
+    let mobility = rec.inv_mobility_per_peak.take();
+    let obj = json_object(py, &rec)?;
+    let d = obj.bind(py);
+    d.set_item("mz", mz)?;
+    d.set_item("intensity", intensity)?;
+    d.set_item("inv_mobility_per_peak", mobility)?;
+    d.set_item("total_ion_current", tic)?;
+    d.set_item("base_peak_mz", base_peak.map(|p| p.0))?;
+    d.set_item("base_peak_intensity", base_peak.map(|p| p.1))?;
+    Ok(obj)
+}
+
+fn json_object<T: serde::Serialize>(py: Python<'_>, value: &T) -> PyResult<Py<PyAny>> {
+    let mut value =
+        serde_json::to_value(value).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    normalize_record_json(&mut value);
+    let json = serde_json::to_string(&value).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(py.import("json")?.call_method1("loads", (json,))?.unbind())
+}
+
+fn normalize_record_json(value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(fields) = value {
+        if fields.contains_key("native_id") || fields.contains_key("source_file_name") {
+            fields
+                .entry("extra")
+                .or_insert_with(|| serde_json::json!({}));
+        }
+        if fields.contains_key("native_id") {
+            for (source, alias) in [
+                ("total_ion_current", "reported_total_ion_current"),
+                ("base_peak_mz", "reported_base_peak_mz"),
+                ("base_peak_intensity", "reported_base_peak_intensity"),
+            ] {
+                if let Some(reported) = fields.get(source).cloned() {
+                    fields.insert(alias.to_string(), reported);
+                }
+            }
+        }
+        for (key, field) in fields {
+            match key.as_str() {
+                "polarity" | "scan_mode" | "analyzer" | "activation" => {
+                    if let Some(text) = field.as_str() {
+                        *field = serde_json::Value::String(text.to_ascii_lowercase());
+                    }
+                }
+                "mobility_array_kind" => {
+                    if let Some(text) = field.as_str() {
+                        let normalized = match text {
+                            "InverseReducedVsPerCm2" => "inverse_reduced_k0",
+                            "DriftTimeMilliseconds" => "drift_time_ms",
+                            other => other,
+                        };
+                        *field = serde_json::Value::String(normalized.to_string());
+                    }
+                }
+                "analyzers" => {
+                    if let Some(items) = field.as_array_mut() {
+                        for item in items {
+                            if let Some(text) = item.as_str() {
+                                *item = serde_json::Value::String(text.to_ascii_lowercase());
+                            }
+                        }
+                    }
+                }
+                _ => normalize_record_json(field),
+            }
+        }
+    }
+}
+
+/// Bounded stream of canonical spectrum records.
+#[pyclass(module = "openwraw")]
+struct RecordIter {
+    // `None` marks a complete stream, so a closed channel without it means
+    // the decode thread died.
+    receiver: Mutex<Receiver<Option<SpectrumRecord>>>,
+    finished: bool,
+}
+
+#[pymethods]
+impl RecordIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        if slf.finished {
+            return Ok(None);
+        }
+        let receiver = &slf.receiver;
+        let message = py.detach(|| {
+            receiver
+                .lock()
+                .map_err(|_| "record stream lock poisoned")?
+                .recv()
+                .map_err(|_| "record decode thread ended without a result")
+        });
+        match message {
+            Ok(Some(rec)) => record_object(py, rec).map(Some),
+            Ok(None) => {
+                slf.finished = true;
+                Ok(None)
+            }
+            Err(error) => {
+                slf.finished = true;
+                Err(PyRuntimeError::new_err(error))
+            }
+        }
+    }
 }
 
 fn find_side_file(dir: &Path, name: &str) -> ::openwraw::Result<Option<PathBuf>> {
@@ -62,6 +188,21 @@ pub struct RunHeader {
 
 #[pymethods]
 impl RunHeader {
+    /// Per-function mass calibration polynomials from `_HEADER.TXT`.
+    #[getter]
+    fn calibrations<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let out = PyDict::new(py);
+        for (index, cal) in &self.inner.cal_functions {
+            let row = PyDict::new(py);
+            row.set_item("coeffs", &cal.coeffs)?;
+            row.set_item(
+                "cal_type",
+                format!("{:?}", cal.cal_type).to_ascii_lowercase(),
+            )?;
+            out.set_item(index, row)?;
+        }
+        Ok(out)
+    }
     /// MassLynx file format version string (e.g. `"01.00"`).
     #[getter]
     fn version(&self) -> Option<&str> {
@@ -331,6 +472,185 @@ pub struct RawReader {
 
 #[pymethods]
 impl RawReader {
+    /// Stream full canonical spectrum records with a two-record buffer.
+    fn iter_records(&self) -> RecordIter {
+        let mut source = ::openwraw::mzml::WatersSource::new(self.reader.clone());
+        let (sender, receiver) = sync_channel(2);
+        std::thread::spawn(move || {
+            for record in source.iter_spectra() {
+                if sender.send(Some(record)).is_err() {
+                    return;
+                }
+            }
+            let _ = sender.send(None);
+        });
+        RecordIter {
+            receiver: Mutex::new(receiver),
+            finished: false,
+        }
+    }
+
+    /// Canonical run metadata used by the Rust mzML writer.
+    fn run_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        json_object(
+            py,
+            &::openwraw::mzml::WatersSource::new(self.reader.clone()).run_metadata(),
+        )
+    }
+
+    /// Canonical TIC, BPC, and other chromatograms with seconds as the time unit.
+    fn read_chromatograms(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        let mut source = ::openwraw::mzml::WatersSource::new(self.reader.clone());
+        source
+            .iter_chromatograms()
+            .map(|rec| json_object(py, &rec))
+            .collect()
+    }
+
+    /// Full canonical record for one scan in the non-lock-mass spectrum stream.
+    fn read_record(
+        &self,
+        py: Python<'_>,
+        func_index: u32,
+        scan_index: usize,
+    ) -> PyResult<Py<PyAny>> {
+        let function = self.function(func_index)?;
+        if function.info.is_lock_mass() || scan_index >= function.scan_count() {
+            return Err(PyRuntimeError::new_err(
+                "scan is outside the canonical spectrum stream",
+            ));
+        }
+        let before: usize = self
+            .reader
+            .functions
+            .iter()
+            .filter(|f| !f.info.is_lock_mass() && f.index < func_index)
+            .map(|f| f.scan_count())
+            .sum();
+        let counter = u32::try_from(before + scan_index + 1)
+            .map_err(|_| PyRuntimeError::new_err("scan counter exceeds u32"))?;
+        let scan = self
+            .reader
+            .decode_scan(func_index, scan_index)
+            .map_err(to_py_err)?;
+        let record = ::openwraw::mzml::record_from_scan(&self.reader, counter, scan);
+        record_object(py, record)
+    }
+
+    /// Raw instrument values decoded from `_extern.inf`.
+    fn instrument_parameters<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let out = PyDict::new(py);
+        out.set_item("lteff_mm", self.ext.lteff_mm)?;
+        out.set_item("veff_v", self.ext.veff_v)?;
+        out.set_item("pusher_interval_us", self.ext.pusher_interval_us)?;
+        out.set_item("polarity", self.polarity())?;
+        let functions = PyDict::new(py);
+        for (index, f) in &self.ext.functions {
+            let row = PyDict::new(py);
+            row.set_item("index", f.index)?;
+            row.set_item("pusher_interval_us", f.pusher_interval_us)?;
+            row.set_item("mode", format!("{:?}", f.mode))?;
+            row.set_item("set_mass_da", f.set_mass_da)?;
+            functions.set_item(index, row)?;
+        }
+        out.set_item("functions", functions)?;
+        Ok(out)
+    }
+
+    /// Collision energy and ETD mode decoded for a scan from `_FUNCnnn.STS`.
+    fn scan_parameters<'py>(
+        &self,
+        py: Python<'py>,
+        func_index: u32,
+        scan_index: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let scan = self
+            .reader
+            .decode_scan(func_index, scan_index)
+            .map_err(to_py_err)?;
+        let out = PyDict::new(py);
+        out.set_item("collision_energy_ev", scan.collision_energy_ev)?;
+        out.set_item("etd_fragmentation_mode", scan.etd_fragmentation_mode)?;
+        Ok(out)
+    }
+
+    /// Every named statistics channel decoded for a scan from `_FUNCnnn.STS`.
+    fn scan_channels<'py>(
+        &self,
+        py: Python<'py>,
+        func_index: u32,
+        scan_index: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let function = self.function(func_index)?;
+        if scan_index >= function.scan_count() {
+            return Err(PyRuntimeError::new_err(format!(
+                "scan {scan_index} out of range"
+            )));
+        }
+        let out = PyDict::new(py);
+        if let Some(sts) = &function.sts {
+            for channel in sts.channels() {
+                out.set_item(&channel.name, sts.value_at(channel, scan_index))?;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Source sequence, encoding, and byte offset of every statistics channel.
+    fn channel_descriptors<'py>(
+        &self,
+        py: Python<'py>,
+        func_index: u32,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let function = self.function(func_index)?;
+        let mut out = Vec::new();
+        if let Some(sts) = &function.sts {
+            for channel in sts.channels() {
+                let row = PyDict::new(py);
+                row.set_item("seq", channel.seq)?;
+                row.set_item("name", &channel.name)?;
+                row.set_item(
+                    "encoding",
+                    format!("{:?}", channel.encoding).to_ascii_lowercase(),
+                )?;
+                row.set_item("offset", channel.offset)?;
+                out.push(row);
+            }
+        }
+        Ok(out)
+    }
+
+    /// One decoded `_FUNCnnn.IDX` record, including vendor record offsets.
+    fn index_record<'py>(
+        &self,
+        py: Python<'py>,
+        func_index: u32,
+        scan_index: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let function = self.function(func_index)?;
+        let out = PyDict::new(py);
+        match &function.scan_index {
+            ScanIndex::A(records) => {
+                let row = records.get(scan_index).ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
+                })?;
+                out.set_item("variant", "a")?;
+                out.set_item("dat_offset", row.dat_offset)?;
+                out.set_item("n_records", row.n_records)?;
+                out.set_item("retention_time_min", row.retention_time_min)?;
+                out.set_item("peak_count", row.peak_count)?;
+            }
+            ScanIndex::B(records) => {
+                let row = records.get(scan_index).ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("scan {scan_index} out of range"))
+                })?;
+                out.set_item("variant", "b")?;
+                out.set_item("dat_offset", row.dat_offset)?;
+                out.set_item("retention_time_min", row.retention_time_min)?;
+            }
+        }
+        Ok(out)
+    }
     /// Open a .raw directory.
     ///
     /// Reads `_HEADER.TXT`, `_extern.inf`, `_FUNCTNS.INF`, and optionally
@@ -563,6 +883,7 @@ impl RawReader {
 
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<RecordIter>()?;
     // Forward Rust `log` records to Python `logging` under the "openwraw"
     // logger hierarchy. Records below the configured Python level are
     // dropped cheaply; configure logging before opening files, since levels
