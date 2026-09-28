@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python can stream complete canonical spectrum records and read canonical
+  run metadata and chromatograms. Added calibration, instrument parameter,
+  scan index, and every decoded status channel. Namespaced extras preserve
+  these fields in the shared records.
+
 ## [2.0.0] - 2026-09-26
 
 Major release for the Waters decoder rework in #33. Encodings A and D now

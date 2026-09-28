@@ -157,6 +157,66 @@ fn parse_acquired_datetime(date: &str, time: &str) -> Option<String> {
 
 /// Build a [`msc::RunMetadata`] from a [`Reader`].
 fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
+    let mut extra = ::std::collections::BTreeMap::new();
+    if let Some(value) = &reader.header.version {
+        extra.insert("openwraw.header_version".into(), value.clone());
+    }
+    if let Some(value) = &reader.header.acquired_name {
+        extra.insert("openwraw.acquired_name".into(), value.clone());
+    }
+    if let Some(value) = &reader.header.acquired_date {
+        extra.insert("openwraw.acquired_date".into(), value.clone());
+    }
+    if let Some(value) = &reader.header.acquired_time {
+        extra.insert("openwraw.acquired_time".into(), value.clone());
+    }
+    if let Some(value) = &reader.header.operator {
+        extra.insert("openwraw.operator".into(), value.clone());
+    }
+    if let Some(value) = &reader.header.sample_description {
+        extra.insert("openwraw.sample_description".into(), value.clone());
+    }
+    extra.insert(
+        "openwraw.lteff_mm".into(),
+        reader.extern_inf.lteff_mm.to_string(),
+    );
+    extra.insert(
+        "openwraw.veff_v".into(),
+        reader.extern_inf.veff_v.to_string(),
+    );
+    if let Some(value) = reader.extern_inf.pusher_interval_us {
+        extra.insert("openwraw.pusher_interval_us".into(), value.to_string());
+    }
+    for (index, function) in &reader.extern_inf.functions {
+        let prefix = format!("openwraw.function.{index}");
+        extra.insert(format!("{prefix}.mode"), format!("{:?}", function.mode));
+        extra.insert(
+            format!("{prefix}.start_mass_da"),
+            function.start_mass_da.to_string(),
+        );
+        extra.insert(
+            format!("{prefix}.end_mass_da"),
+            function.end_mass_da.to_string(),
+        );
+        if let Some(value) = function.pusher_interval_us {
+            extra.insert(format!("{prefix}.pusher_interval_us"), value.to_string());
+        }
+        if let Some(value) = function.set_mass_da {
+            extra.insert(format!("{prefix}.set_mass_da"), value.to_string());
+        }
+    }
+    for (index, cal) in &reader.header.cal_functions {
+        let prefix = format!("openwraw.calibration.{index}");
+        extra.insert(format!("{prefix}.type"), format!("{:?}", cal.cal_type));
+        extra.insert(
+            format!("{prefix}.coefficients"),
+            cal.coeffs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
     let instrument_name = reader
         .header
         .instrument
@@ -169,7 +229,7 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         .zip(reader.header.acquired_time.as_deref())
         .and_then(|(d, t)| parse_acquired_datetime(d, t));
     msc::RunMetadata {
-        extra: ::std::collections::BTreeMap::new(),
+        extra,
         source_file_name: reader.bundle_name.clone(),
         source_file_format: source_file_format_cv(),
         native_id_format: native_id_format_cv(),
@@ -391,7 +451,11 @@ pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord
 /// iteration order, not a count of successfully-decoded scans so far, so
 /// `index`/`scan_number` stay stable regardless of whether earlier scans
 /// failed to decode.
-fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> msc::SpectrumRecord {
+pub fn record_from_scan(
+    reader: &Reader,
+    scan_counter: u32,
+    scan: DecodedScan,
+) -> msc::SpectrumRecord {
     let DecodedScan {
         function_index,
         scan_idx,
@@ -416,8 +480,23 @@ fn record_from_scan(reader: &Reader, scan_counter: u32, scan: DecodedScan) -> ms
         collision_energy_ev,
         etd_fragmentation_mode,
     );
+    let mut extra = ::std::collections::BTreeMap::new();
+    extra.insert("openwraw.function_index".into(), function_index.to_string());
+    extra.insert("openwraw.scan_index".into(), scan_idx.to_string());
+    if let Some(function) = reader.functions.iter().find(|f| f.index == function_index) {
+        if let Some(sts) = &function.sts {
+            for channel in sts.channels() {
+                if let Some(value) = sts.value_at(channel, scan_idx) {
+                    extra.insert(
+                        format!("openwraw.sts.{}.{}", channel.seq, channel.name),
+                        value.to_string(),
+                    );
+                }
+            }
+        }
+    }
     msc::SpectrumRecord {
-        extra: ::std::collections::BTreeMap::new(),
+        extra,
         acquisition_event_id: None,
         index: (scan_counter as usize).saturating_sub(1),
         scan_number: scan_counter,
