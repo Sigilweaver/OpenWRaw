@@ -548,8 +548,6 @@ impl RawReader {
         for (index, f) in &self.ext.functions {
             let row = PyDict::new(py);
             row.set_item("index", f.index)?;
-            row.set_item("start_mass_da", f.start_mass_da)?;
-            row.set_item("end_mass_da", f.end_mass_da)?;
             row.set_item("pusher_interval_us", f.pusher_interval_us)?;
             row.set_item("mode", format!("{:?}", f.mode))?;
             row.set_item("set_mass_da", f.set_mass_da)?;

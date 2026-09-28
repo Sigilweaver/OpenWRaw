@@ -39,14 +39,21 @@ records, so reading only the lower 16 bits truncates them. The high byte is
 0x18. DAT records may be 6 or 8 bytes; consecutive DAT offsets establish the
 width. Those offsets also establish scan boundaries directly.
 
-The `peak_count` field is retained as decoded metadata but is not a valid
-assertion on the length returned by the current Encoding A decoder. In the
-corpus, a scan can contain thousands of non-zero 6-byte DAT records while the
-IDX field reports only tens or hundreds of centroid peaks (for example, 3,253
-records and 47 peaks). The decoder emits the former after removing zero-count
-records; using `peak_count` as a sanity check would therefore
-reject valid corpus scans unless the unimplemented centroid relationship is
-first established (Sigilweaver/OpenWRaw#24).
+`peak_count` cannot be asserted for *equality* against the length returned by
+the current Encoding A decoder. In the corpus, a scan can contain thousands
+of non-zero 6-byte DAT records while the IDX field reports only tens or
+hundreds of centroid peaks (for example, 3,253 records and 47 peaks). The
+decoder emits the former after removing sentinel and zero-intensity records;
+it does not centroid, so its output count and `peak_count` measure different
+things and an equality check would reject valid corpus scans.
+
+What does hold, and is what `Reader::decode_scan` checks (as a
+`debug_assert!`, `check_peak_count_sanity` in `reader.rs`): a centroid count
+can never exceed the raw decoded record count, since every centroid is built
+from at least one raw point. `peak_count <= decoded_len` is therefore a cheap
+decode sanity check - it catches a decode that produced implausibly few
+points for the peak count the index claims - without depending on the
+unimplemented centroiding relationship (Sigilweaver/OpenWRaw#24).
 
 `n_records = u32@0x04 & 0x00FFFFFF` provides the record count when the next
 offset is unavailable. When the IDX length is divisible by both 22 and 30,

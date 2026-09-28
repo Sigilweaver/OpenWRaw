@@ -190,14 +190,6 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
     for (index, function) in &reader.extern_inf.functions {
         let prefix = format!("openwraw.function.{index}");
         extra.insert(format!("{prefix}.mode"), format!("{:?}", function.mode));
-        extra.insert(
-            format!("{prefix}.start_mass_da"),
-            function.start_mass_da.to_string(),
-        );
-        extra.insert(
-            format!("{prefix}.end_mass_da"),
-            function.end_mass_da.to_string(),
-        );
         if let Some(value) = function.pusher_interval_us {
             extra.insert(format!("{prefix}.pusher_interval_us"), value.to_string());
         }

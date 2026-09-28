@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run metadata and chromatograms. Added calibration, instrument parameter,
   scan index, and every decoded status channel. Namespaced extras preserve
   these fields in the shared records.
+- `Reader::decode_scan` now sanity-checks `_FUNCnnn.IDX`'s `peak_count`
+  against the number of peaks the Encoding A decoder actually emitted
+  (`debug_assert!` in `reader.rs`'s `check_peak_count_sanity`). Equality
+  doesn't hold (the decoder emits raw non-zero records, not centroids), but a
+  centroid count can never exceed the raw decoded count, so `peak_count <=
+  decoded_len` is asserted instead. Refs #24.
+
+### Changed
+
+- **Breaking (Rust):** adopts `openmassspec-core` 2.0.0 (arrow 60). Python
+  users are unaffected.
+
+### Removed
+
+- `ExternFunction::start_mass_da` / `end_mass_da` (decoded from `_extern.inf`'s
+  `Start Mass` / `End Mass` fields). The field was never read outside its own
+  module's tests - spectrum decoding has always used `_FUNCTNS.INF`'s
+  `FunctionInfo::mz_low` / `mz_high` exclusively - and the parser never
+  handled the `MSMS End Mass` key that `TOF MSMS FUNCTION` sections use
+  instead of `End Mass`, so `end_mass_da` was silently `0.0` for every
+  targeted-MS/MS function. Not reliable enough to promote to a decode
+  cross-check, so removed rather than wired in. Refs #24.
+
+### Documented
+
+- `raw::chroms::ChromChannel::source_type` (BSM pump vs. column/sample
+  device) is kept as-is: it's already exposed by the Python `RawReader`
+  binding for callers who want to filter/label channels themselves, and is
+  deliberately not copied into `openmassspec_core::ChromatogramRecord`,
+  whose model has no source-device field and whose consumers can already
+  read the device off each channel's `name`. Refs #24.
 
 ## [2.0.0] - 2026-09-26
 
