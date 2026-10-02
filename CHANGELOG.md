@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Decode 12-byte LCT Premier mass records from original public MTBLS701 and
+  MTBLS13770 acquisitions instead of treating them as 6-byte Encoding A.
+  Intensity flags and the auxiliary word remain uninterpreted; flagged peaks
+  are preserved. The 213-byte `_CHROMS.INF` report in #36 remains unresolved.
+
+### Changed
+
+- Rust `Encoding` adds variant `E`; exhaustive matches must handle it.
+  Python `function_encoding` can return `"e"` for 12-byte LCT records.
+
 ## [3.0.0] - 2026-09-28
 
 ### Added

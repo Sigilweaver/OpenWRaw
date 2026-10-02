@@ -39,6 +39,8 @@ Optional Python bindings are available via the
 | `_FUNCnnn.DAT` Encoding A (6-byte records)      | supported  |
 | `_FUNCnnn.DAT` Encoding B (8-byte IMS cells)    | supported  |
 | `_FUNCnnn.DAT` Encoding C (8-byte sub-bin)      | supported  |
+| `_FUNCnnn.DAT` Encoding D (8-byte floating m/z) | supported  |
+| `_FUNCnnn.DAT` Encoding E (12-byte LCT records) | supported for public MTBLS701/MTBLS13770 fixtures; flags/auxiliary word unresolved |
 | `_CHROMS.INF` + `_CHROnnnn.DAT` chromatograms   | supported  |
 | mzML export                                     | supported  |
 | Apex3D `.bin` files                             | best-effort|

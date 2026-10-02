@@ -11,7 +11,8 @@ fields remain without a confirmed interpretation.
 ## Variant A: 22-byte record (non-IMS / simple TOF-MS)
 
 Observed in: PXD058812 (Waters QTOF), PXD041695 (QTof), and
-PXD081045 (Vion UNIFI export). The last uses 8-byte DAT records.
+PXD081045 (Vion UNIFI export), and MTBLS701/MTBLS13770 (LCT Premier).
+Vion uses 8-byte DAT records; the LCT mass functions use 12-byte records.
 
 Key facts:
 - File size = N x 22 bytes (exact, no header)
@@ -21,7 +22,7 @@ Key facts:
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
 | 0x00   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x04   | u32  | **Yes**   | `(0x18 << 24) \| n_records`: lower 24 bits = DAT record count; high byte = 0x18 format marker |
+| 0x04   | u32  | **Yes**   | Lower 24 bits = DAT record count; high byte = format marker (0x18, or 0x4c/0x08 in the public LCT mass/lock functions) |
 | 0x08   | f32  | Partial   | Non-zero for data scans, 0 for blank scans. Correlates with scan signal level but no confirmed formula. |
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
 | 0x10   | u16  | **Yes**   | Centroid peak count (0 for blank scans, 17-196 per data scan in corpus) |
@@ -32,12 +33,15 @@ Validated: 22 x 197 = 4334 bytes (molecular_mass_P15_01.raw), 22 x 426 = 9372 by
 
 ### Field +0x04: Packed type-code and record count
 
-Format: `(0x18 << 24) | n_records`.
+Format: `(marker << 24) | n_records`.
 
 The lower 24 bits count DAT records. PXD041695 has scans with more than 65,535
 records, so reading only the lower 16 bits truncates them. The high byte is
-0x18. DAT records may be 6 or 8 bytes; consecutive DAT offsets establish the
-width. Those offsets also establish scan boundaries directly.
+0x18 in the earlier corpus and 0x4c/0x08 in the public LCT mass/lock
+functions. DAT records may be 6, 8 or 12 bytes; consecutive DAT offsets
+establish the width. Those offsets also establish scan boundaries directly.
+At sizes divisible by both 22 and 30, these known markers and ordered DAT
+offsets disambiguate the two variants.
 
 `peak_count` cannot be asserted for *equality* against the length returned by
 the current Encoding A decoder. In the corpus, a scan can contain thousands

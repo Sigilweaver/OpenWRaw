@@ -83,7 +83,7 @@ def test_ms_level_and_encoding(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
     for f in r.functions:
         assert r.ms_level(f.index) in (1, 2)
-        assert r.function_encoding(f.index) in ("a", "b", "c", "d")
+        assert r.function_encoding(f.index) in ("a", "b", "c", "d", "e")
 
 
 def test_n_scans_and_retention_time(raw_bundle):

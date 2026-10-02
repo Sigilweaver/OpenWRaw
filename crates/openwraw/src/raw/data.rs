@@ -273,6 +273,50 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
+// -- Encoding E --
+
+/// Decode the 12-byte Variant A records observed in public LCT Premier bundles.
+///
+/// The intensity word has a 21-bit normalized mantissa and a 5-bit exponent
+/// at bits 22-26: intensity = mantissa * 2^(exponent - 21). Higher bits are
+/// flags, not part of the exponent. The position word at bytes 4-7 uses the
+/// same floating-point m/z representation as Encoding D. Bytes 8-11 and
+/// the intensity flags are not interpreted; flagged peaks remain present.
+/// Derived from original MTBLS701 and MTBLS13770 bytes and scan-index TIC
+/// self-consistency, without vendor software or vendor-derived output.
+pub fn decode_encoding_e(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
+    if scan_bytes.len() % 12 != 0 {
+        return Err(crate::Error::Parse(format!(
+            "Encoding E: scan size {} is not a multiple of 12",
+            scan_bytes.len()
+        )));
+    }
+    let n = scan_bytes.len() / 12;
+    let mut out = Spectrum {
+        mz: Vec::with_capacity(n),
+        intensity: Vec::with_capacity(n),
+    };
+    for rec in scan_bytes.chunks_exact(12) {
+        let word = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
+        let mantissa = word & 0x001f_ffff;
+        if mantissa == 0 {
+            continue;
+        }
+        if mantissa & (1 << 20) == 0 || word & (1 << 21) != 0 {
+            return Err(crate::Error::Parse(format!(
+                "Encoding E: unsupported intensity word {word:#010x}"
+            )));
+        }
+        let exponent = ((word >> 22) & 0x1f) as i32;
+        let intensity = f64::from(mantissa) * 2f64.powi(exponent - 21);
+        let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
+        let mz = encoding_d_mz(position)?;
+        out.mz.push(params.cal.apply(mz.sqrt()).powi(2));
+        out.intensity.push(intensity as f32);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +419,53 @@ mod tests {
         let scan = bytes_of(&[enc_d_record(1 << 16, 0x5400_0000)]);
         let spec = decode_encoding_d(&scan, &params).unwrap();
         assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
+    }
+
+    // -- Encoding E tests --
+
+    fn enc_e_record(intensity: u32, position: u32, auxiliary: u32) -> [u8; 12] {
+        let mut r = [0u8; 12];
+        r[0..4].copy_from_slice(&intensity.to_le_bytes());
+        r[4..8].copy_from_slice(&position.to_le_bytes());
+        r[8..12].copy_from_slice(&auxiliary.to_le_bytes());
+        r
+    }
+
+    #[test]
+    fn enc_e_decodes_compressed_intensity_without_flag_bits() {
+        let scan = bytes_of(&[
+            enc_e_record(0, 0, 0),
+            enc_e_record(0x0050_0000, 0x5400_0000, 0),
+            enc_e_record(0x1050_0000, 0x5400_0000, 0x0418_2c40),
+            enc_e_record(0x3058_0000, 0x5400_0000, u32::MAX),
+            enc_e_record(0x0090_0000, 0x5400_0000, 1),
+        ]);
+        let spec = decode_encoding_e(&scan, &test_params()).unwrap();
+        assert!(spec.mz.iter().all(|mz| (*mz - 512.0).abs() < 1e-9));
+        assert_eq!(spec.intensity, vec![1.0, 1.0, 1.5, 2.0]);
+    }
+
+    #[test]
+    fn enc_e_applies_calibration_to_sqrt_mz() {
+        let mut params = test_params();
+        params.cal = FunctionCal {
+            coeffs: vec![0.0, 1.0001],
+            cal_type: CalType::T1,
+        };
+        let scan = bytes_of(&[enc_e_record(0x0050_0000, 0x5400_0000, 0)]);
+        let spec = decode_encoding_e(&scan, &params).unwrap();
+        assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn enc_e_rejects_truncation_and_unsupported_words() {
+        assert!(decode_encoding_e(&[0; 11], &test_params()).is_err());
+        for word in [0x0048_0000, 0x0070_0000] {
+            let scan = bytes_of(&[enc_e_record(word, 0x5400_0000, 0)]);
+            assert!(decode_encoding_e(&scan, &test_params()).is_err());
+        }
+        let scan = bytes_of(&[enc_e_record(0x0050_0000, 0x5000_0000, 0)]);
+        assert!(decode_encoding_e(&scan, &test_params()).is_err());
     }
 
     // -- Encoding A tests --
