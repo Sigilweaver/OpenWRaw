@@ -769,6 +769,7 @@ impl RawReader {
             Encoding::B => "b",
             Encoding::C => "c",
             Encoding::D => "d",
+            Encoding::E => "e",
         })
     }
 

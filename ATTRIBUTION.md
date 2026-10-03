@@ -32,6 +32,20 @@ original licence (PRIDE's default is CC-BY 4.0; per-dataset terms always win).
 If you use this validation work, please cite the original PRIDE submitters and
 the relevant accession.
 
+## LCT Premier format evidence (MetaboLights)
+
+The 12-byte Encoding E layout was derived from original public acquisitions
+in [MTBLS701](https://www.ebi.ac.uk/metabolights/MTBLS701) and
+[MTBLS13770](https://www.ebi.ac.uk/metabolights/MTBLS13770). Validation uses
+record widths, normalized word patterns, ordered positions, and same-file
+scan-index intensity totals. It does not use vendor software or
+vendor-derived expected output. Intensity flags and the auxiliary word
+remain uninterpreted.
+
+Raw files are kept outside version control and are not redistributed.
+MTBLS701 exposes EMBL-EBI Terms of Use; MTBLS13770 explicitly exposes CC0 1.0.
+Per-study terms apply. Please cite the original studies when using the data.
+
 ## Third-party Rust dependencies
 
 The OpenWRaw core (`openwraw`) crate has no

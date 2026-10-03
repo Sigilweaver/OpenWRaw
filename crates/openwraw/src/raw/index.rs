@@ -74,7 +74,12 @@ impl ScanIndex {
                 // monotonically increasing DAT offsets to disambiguate.
                 let looks_a = data.chunks_exact(STRIDE_A).all(|rec| {
                     let packed = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
-                    packed & 0xff00_0000 == 0x1800_0000
+                    // 0x18: existing 6/8-byte families; 0x4c/0x08: public
+                    // LCT Premier mass/lock functions (12-byte records).
+                    matches!(
+                        packed & 0xff00_0000,
+                        0x1800_0000 | 0x4c00_0000 | 0x0800_0000
+                    )
                 }) && data
                     .chunks_exact(STRIDE_A)
                     .map(|rec| u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]))
@@ -209,6 +214,26 @@ mod tests {
             ScanIndex::from_bytes(&b_data(&b)).unwrap(),
             ScanIndex::B(_)
         ));
+    }
+
+    #[test]
+    fn ambiguous_size_recognizes_public_lct_markers() {
+        // Both markers occur in the original MTBLS701/MTBLS13770 indexes.
+        // Fifteen Variant A scans also fit eleven Variant B records.
+        for marker in [0x4c00_0000u32, 0x0800_0000u32] {
+            let a: Vec<_> = (0..15)
+                .map(|i| {
+                    let mut rec = make_a_record(i * 12, 1, i as f32, 0);
+                    rec[4..8].copy_from_slice(&(marker | 1).to_le_bytes());
+                    rec
+                })
+                .collect();
+            let ScanIndex::A(records) = ScanIndex::from_bytes(&a_data(&a)).unwrap() else {
+                panic!("expected Variant A for marker {marker:#010x}");
+            };
+            assert_eq!(records.len(), 15);
+            assert!(records.iter().all(|r| r.n_records == 1));
+        }
     }
 
     fn b_data(records: &[[u8; STRIDE_B]]) -> Vec<u8> {

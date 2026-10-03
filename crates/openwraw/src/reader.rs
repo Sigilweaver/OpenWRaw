@@ -5,7 +5,7 @@
 //!
 //! * Parses `_HEADER.TXT`, `_FUNCTNS.INF`, `_extern.inf`.
 //! * Discovers every `_FUNCnnn.IDX` / `_FUNCnnn.DAT` pair on disk.
-//! * Picks an encoding (A / B / C) per function from IDX stride, DAT record
+//! * Picks an encoding (A / B / C / D / E) per function from IDX stride, DAT record
 //!   width, and instrument name (`SYNAPT*` indicates Encoding B IMS).
 //! * Provides [`Reader::iter_spectra`] which yields one decoded spectrum
 //!   per scan, in `(function_index, scan_index_in_function)` order,
@@ -18,8 +18,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::raw::data::{
-    decode_encoding_a, decode_encoding_b, decode_encoding_c, decode_encoding_d, DecodeParams,
-    ImsSpectrum, Spectrum,
+    decode_encoding_a, decode_encoding_b, decode_encoding_c, decode_encoding_d, decode_encoding_e,
+    DecodeParams, ImsSpectrum, Spectrum,
 };
 use crate::raw::extern_inf::ExternInf;
 use crate::raw::func_sts::FuncSts;
@@ -63,6 +63,8 @@ pub enum Encoding {
     C,
     /// 8-byte records (16.16 intensity, floating-point m/z). Variant A index.
     D,
+    /// 12-byte records (compressed intensity, floating-point m/z, auxiliary word).
+    E,
 }
 
 /// One acquisition function's static metadata, ready for decoding.
@@ -168,6 +170,7 @@ impl Reader {
             let dat_size = fs::metadata(&dat_path)?.len();
             let (encoding, reason) = match &scan_index {
                 ScanIndex::A(records) => match variant_a_record_width(records) {
+                    Some(12) => (Encoding::E, "22-byte index, 12-byte records".to_owned()),
                     Some(8) => (Encoding::D, "22-byte index, 8-byte records".to_owned()),
                     Some(_) => (Encoding::A, "22-byte index, 6-byte records".to_owned()),
                     None => (
@@ -318,6 +321,7 @@ impl Reader {
             Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
             Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
             Encoding::D => DecodedSpectrum::Plain(decode_encoding_d(&bytes, &params)?),
+            Encoding::E => DecodedSpectrum::Plain(decode_encoding_e(&bytes, &params)?),
         };
         // Only Encoding A's 6-byte records are known to relate to the IDX
         // `peak_count` this way (docs/format/03-func-idx.md).
@@ -406,10 +410,10 @@ fn index_end(scan_index: &ScanIndex, encoding: Encoding) -> Option<u64> {
     let ScanIndex::A(records) = scan_index else {
         return None;
     };
-    let width = if matches!(encoding, Encoding::A) {
-        6
-    } else {
-        8
+    let width = match encoding {
+        Encoding::A => 6,
+        Encoding::E => 12,
+        _ => 8,
     };
     records
         .iter()
@@ -423,7 +427,7 @@ fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
     })
 }
 
-/// The 22-byte index is paired with both 6-byte and 8-byte DAT records.
+/// The 22-byte index is paired with 6-byte, 8-byte and 12-byte DAT records.
 /// Consecutive offsets give a direct width check without reading peak data.
 fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u64> {
     records.windows(2).find_map(|pair| {
@@ -433,7 +437,7 @@ fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u
             return None;
         }
         match bytes / count {
-            width @ (6 | 8) => Some(width),
+            width @ (6 | 8 | 12) => Some(width),
             _ => None,
         }
     })
@@ -486,12 +490,12 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                 ))
             })?;
             // Variant A stores the record count directly; the width depends
-            // on the DAT layout (6 bytes for Encoding A, 8 for Encoding D).
+            // on the DAT layout (6 bytes for A, 8 for D, 12 for E).
             let offset = rec.dat_offset as u64;
-            let width = if matches!(entry.encoding, Encoding::A) {
-                6
-            } else {
-                8
+            let width = match entry.encoding {
+                Encoding::A => 6,
+                Encoding::E => 12,
+                _ => 8,
             };
             let length = (rec.n_records as u64) * width;
             (offset, length, rec.retention_time_min)
@@ -534,6 +538,7 @@ pub fn encoding_counts(reader: &Reader) -> BTreeMap<&'static str, usize> {
             Encoding::B => "B",
             Encoding::C => "C",
             Encoding::D => "D",
+            Encoding::E => "E",
         };
         *out.entry(key).or_insert(0) += 1;
     }
@@ -667,6 +672,30 @@ mod tests {
         );
         let (_, length, _) = scan_slice(&entry, 0).unwrap();
         assert_eq!(length, 30);
+    }
+
+    #[test]
+    fn variant_a_twelve_byte_records_are_recognized() {
+        let records = vec![
+            ScanIndexA {
+                dat_offset: 0,
+                n_records: 2,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            },
+            ScanIndexA {
+                dat_offset: 24,
+                n_records: 3,
+                retention_time_min: 0.1,
+                peak_count: 0,
+            },
+        ];
+        assert_eq!(variant_a_record_width(&records), Some(12));
+        let mut entry = entry_with(ScanIndex::A(records), 60);
+        entry.encoding = Encoding::E;
+        assert_eq!(scan_slice(&entry, 0).unwrap().1, 24);
+        assert_eq!(scan_slice(&entry, 1).unwrap().1, 36);
+        assert_eq!(index_end(&entry.scan_index, entry.encoding), Some(60));
     }
 
     #[test]

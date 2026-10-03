@@ -101,6 +101,49 @@ The Vion files were previously decoded by the Encoding C first/last-record
 anchor, which stretched each scan onto the declared mass range and put
 Leu-Enk anywhere from -1447 to +3378 ppm.
 
+## Encoding E: 12-byte records behind a Variant A index
+
+Original public LCT Premier acquisitions in [MTBLS701](https://www.ebi.ac.uk/metabolights/MTBLS701)
+and [MTBLS13770](https://www.ebi.ac.uk/metabolights/MTBLS13770) pair the
+22-byte index with 12-byte mass records. Consecutive index offsets divided
+by the preceding 24-bit record count establish the width. A separate optical
+function in MTBLS701 uses the existing 6-byte encoding and is unchanged.
+
+| Offset | Size | Interpretation |
+| --- | --- | --- |
+| 0 | 4 | Compressed intensity word, little-endian |
+| 4 | 4 | Floating-point m/z word, same representation as Encoding D |
+| 8 | 4 | Auxiliary word, meaning unresolved |
+
+For intensity word `u`, the measured normalized representation is:
+
+```text
+mantissa = u & 0x001fffff
+exponent = (u >> 22) & 0x1f
+intensity = mantissa * 2^(exponent - 21)
+```
+
+Every nonzero intensity in the six mass functions inspected has bit 20 set
+and bit 21 clear. Higher bits are flags rather than exponent bits; their
+meaning is unresolved. The decoder keeps flagged peaks and ignores the
+auxiliary word. It rejects unsupported nonzero mantissa patterns. The T1
+header calibration applies to sqrt(m/z), as for Encoding D.
+
+Across all 24,484,578 mass records in the two selected acquisitions, raw
+positions are ordered within every scan and have the normalized Encoding D
+position pattern. Intensity sums excluding bit-28-marked points agree with
+the same-file index TIC within 113 ppm. This is a byte-derived consistency
+check, not a definition of that flag or external proof of absolute peak
+accuracy. No vendor software or vendor-derived expected output was used.
+The exact 213-byte `_CHROMS.INF` variant in issue #36 was not present and
+remains unresolved.
+
+This support covers the twelve-byte mass functions. The separate MTBLS701
+optical function still uses Encoding A and fails its existing m/z decoder on
+some scans. Canonical MTBLS13770 function 2 records also retain the existing
+MS2-without-precursor metadata behavior, which does not pass the shared core
+conformance check. Neither limitation is corrected by Encoding E.
+
 ## Encoding B: 8-byte records (IMS mode - SYNAPT G2-Si)
 
 ### Status: Decoded and Validated (Phase 4)
