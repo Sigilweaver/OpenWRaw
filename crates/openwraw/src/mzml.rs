@@ -791,7 +791,7 @@ mod tests {
         let dir = std::env::temp_dir().join("openwraw-test-synthetic-chroms");
         std::fs::create_dir_all(&dir).unwrap();
 
-        // -- _CHROMS.INF: header + 2 meta records + 2 data records --
+        // -- _CHROMS.INF: descriptor header + 2 channel records --
         const RECORD_SIZE: usize = 85;
         let mut inf = vec![0u8; 128];
         inf[0..2].copy_from_slice(&128u16.to_le_bytes());
@@ -799,14 +799,12 @@ mod tests {
         inf[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes());
         inf[6..8].copy_from_slice(&2u16.to_le_bytes());
 
-        let make_meta = |meta_type: u32, name: &str| {
-            let mut r = vec![0u8; RECORD_SIZE];
-            r[0..4].copy_from_slice(&meta_type.to_le_bytes());
-            r[4..4 + name.len()].copy_from_slice(name.as_bytes());
-            r
-        };
-        inf.extend(make_meta(1, "Flags"));
-        inf.extend(make_meta(2, "Description"));
+        inf[32..38].copy_from_slice(&[1, 0, 2, 0, 0, 0]);
+        inf[38..43].copy_from_slice(b"Flags");
+        inf[64..66].copy_from_slice(&4u16.to_le_bytes());
+        inf[80..86].copy_from_slice(&[2, 0, 5, 0, 4, 0]);
+        inf[86..97].copy_from_slice(b"Description");
+        inf[112..114].copy_from_slice(&81u16.to_le_bytes());
 
         let make_data = |source_type: u32, name: &str, cc: &str| {
             let mut r = vec![0u8; RECORD_SIZE];
@@ -817,9 +815,9 @@ mod tests {
             payload[cc_start..cc_start + cc.len()].copy_from_slice(cc.as_bytes());
             r
         };
-        // Channel 0: flow rate (mappable) -> _CHRO003.DAT
+        // Channel 0: flow rate (mappable) -> _CHRO001.DAT
         inf.extend(make_data(4, "BSM Flow Rate A", "$CC$,1.0,3,0,0,mL/min"));
-        // Channel 1: composition % (no CV term) -> _CHRO004.DAT, should be skipped
+        // Channel 1: composition % (no CV term) -> _CHRO002.DAT, should be skipped
         inf.extend(make_data(4, "BSM Composition B", "$CC$,1.0,3,0,0,%"));
 
         std::fs::write(dir.join("_chroms.inf"), &inf).unwrap();
@@ -837,12 +835,12 @@ mod tests {
             bytes
         };
         std::fs::write(
-            dir.join("_chro003.dat"),
+            dir.join("_chro001.dat"),
             make_chro_dat(&[(0.0, 100.0), (0.5, 200.0)]),
         )
         .unwrap();
         std::fs::write(
-            dir.join("_chro004.dat"),
+            dir.join("_chro002.dat"),
             make_chro_dat(&[(0.0, 95.0), (0.5, 96.0)]),
         )
         .unwrap();

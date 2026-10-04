@@ -6,51 +6,59 @@ Absent in direct-infusion or pure-MS datasets.
 
 ## Status: Fully Decoded
 
-Observed in: PXD068881 (CtpA, SYNAPT G2-Si with LC), PXD075602 (DHPR_11257-1.raw, Xevo G2-XS with LC)
+Observed in: PXD068881 (CtpA, SYNAPT G2-Si with LC), PXD075602
+(DHPR_11257-1.raw, Xevo G2-XS with LC), MTBLS701 (LCT Premier), and
+MSV000083877 (Xevo G2 QTof, one fluorescence channel).
 
 ## File Layout
 
 ```
-[128-byte file header]
-[85-byte meta record 0]    -- always type 1 (Flags)
-[85-byte meta record 1]    -- always type 2 (Description)
-[85-byte data record 0]
-[85-byte data record 1]
+[32-byte preamble]
+[48-byte field descriptor 0: Flags]
+[48-byte field descriptor 1: Description]
+[85-byte channel record 0]
+[85-byte channel record 1]
 ...
-[85-byte data record N-1]
 ```
 
-File size = 128 + (2 + N_data) × 85
+File size = 128 + N_channels * 85. The two field descriptors are inside the
+128-byte header. They are not additional channel records after the header.
+A valid one-channel file is therefore 213 bytes, not at least 298 bytes.
 
-Validated: PXD068881 CtpA _CHROMS.INF = 128 + 7×85 = 723 bytes (7 records: 2 meta + 5 data)
-Validated: PXD075602 DHPR_11257-1.raw _CHROMS.INF = 553 bytes = 128 + 5×85 (5 records: 2 meta + 3 data)
+Validated from native public bytes:
 
-## File Header (128 bytes)
+- MSV000083877/ROF_181101_04_IgG.raw: 213 bytes, one fluorescence channel.
+- PSU Data Commons/kt130808_WAS_0179.raw: 213 bytes, one column temperature channel.
+- MTBLS701/1506_SZ_SZ_E01_neg.raw: 468 bytes, four channels.
+- PXD068881/20220517_CtpA_1076_2h_1.raw: 723 bytes, seven channels.
+- PXD075602/DHPR_11257-1.raw: 553 bytes, five channels.
+
+## Preamble and Field Descriptors (128 bytes total)
 
 | Offset | Type | Value | Description |
 |--------|------|-------|-------------|
-| 0x00   | u16  | 0x0080 (128) | Header size in bytes |
-| 0x02   | u16  | 1     | Format version (always 1 observed) |
-| 0x04   | u16  | 0x0055 (85) | Record size in bytes |
-| 0x06   | u16  | 2     | Number of meta records that follow (always 2 observed) |
-| 0x08-0x7F | zeroes | - | Padding to 128 bytes |
+| 0x00 | u16 | 128 | Offset of the first channel record |
+| 0x02 | u16 | 1 | Format version |
+| 0x04 | u16 | 85 | Channel record size in bytes |
+| 0x06 | u16 | 2 | Number of 48-byte field descriptors inside the header |
+| 0x08-0x1F | bytes | zeroes | Preamble padding |
+| 0x20-0x4F | bytes | - | Flags descriptor |
+| 0x50-0x7F | bytes | - | Description descriptor |
 
-## Meta Records (85 bytes each, always 2 records)
+Each field descriptor contains a sequence number (`u16` at relative offset 0),
+encoding code (`u16` at 2), record-field offset (`u16` at 4), null-padded name
+(bytes 6..31), and field width (`u16` at 32). Observed descriptors are:
 
-The two meta records immediately follow the header at offsets 0x80 and 0xD5.
+| Field | Sequence | Encoding code | Offset within channel record | Width |
+|-------|----------|---------------|------------------------------|-------|
+| Flags | 1 | 2 | 0 | 4 |
+| Description | 2 | 5 | 4 | 81 |
 
-| Offset within record | Type | Description |
-|---------------------|------|-------------|
-| 0x00                | u32  | Meta type: 1 = Flags, 2 = Description |
-| 0x04-0x54           | bytes | Null-padded ASCII name string |
+## Channel Records (85 bytes each)
 
-Observed names:
-- Type 1 (Flags): `"Flags"`
-- Type 2 (Description): `"Description"`
+Channel records begin at byte 128. Channel record 0 corresponds to
+`_CHRO001.DAT`, record 1 to `_CHRO002.DAT`, and so on.
 
-## Data Records (85 bytes each)
-
-Data records follow immediately after the two meta records (at byte offset `128 + 2×85 = 298`).
 Each record describes one recorded chromatographic channel.
 
 | Offset | Type | Confirmed | Description |
@@ -74,23 +82,27 @@ $CC$,<scale_f>,<type_code>,<lo_limit>,<hi_limit>,<units>
 - `hi_limit` = upper display limit (float)
 - `units` = ASCII units string (e.g. `psi`, `%`, `uL/min`, `% Power`, `C`)
 
-### Observed Channels (PXD068881 CtpA.raw - 5 data records)
+### Observed Channels (PXD068881 CtpA.raw - 7 channel records)
 
 | Record | source_type | Channel Name | units |
 |--------|-------------|--------------|-------|
-| 0      | 4 (BSM)     | BSM Composition B        | % |
-| 1      | 4 (BSM)     | BSM Measured Flow Rate A | µL/min |
+| 0      | 4 (BSM)     | BSM System Pressure      | psi |
+| 1      | 4 (BSM)     | BSM Composition A        | % |
+| 2      | 4 (BSM)     | BSM Composition B        | % |
+| 3      | 4 (BSM)     | BSM Measured Flow Rate A | µL/min |
+| 4      | 4 (BSM)     | BSM Measured Flow Rate B | µL/min |
+| 5      | 1 (col/samp)| (1) Peltier Engine Power | % Power |
+| 6      | 1 (col/samp)| (1) Chamber Temp         | °C |
+
+### Previously Documented Channel Subset (PXD075602 DHPR_11257-1.raw)
+
+The following three channels are records 2..4 of the five-channel file.
+
+| Record | source_type | Channel Name | units |
+|--------|-------------|--------------|-------|
 | 2      | 4 (BSM)     | BSM Measured Flow Rate B | µL/min |
-| 3      | 1 (col/samp)| (1) Peltier Engine Power | % Power |
-| 4      | 1 (col/samp)| (1) Chamber Temp         | °C |
-
-### Observed Channels (PXD075602 DHPR_11257-1.raw - 3 data records)
-
-| Record | source_type | Channel Name | units |
-|--------|-------------|--------------|-------|
-| 0      | 4 (BSM)     | BSM Measured Flow Rate B | µL/min |
-| 1      | 4 (BSM)     | Column Temperature       | °C |
-| 2      | 4 (BSM)     | Room Temp                | °C |
+| 3      | 4 (BSM)     | Column Temperature       | °C |
+| 4      | 4 (BSM)     | Room Temp                | °C |
 
 Note: BSM channel names are prefixed with 0xB5 (`µ` in Windows-1252) in the raw bytes.
 The lo/hi fields in `$CC$` are 0,0 in all observed samples (limits may not be stored here).
@@ -110,14 +122,16 @@ motivate (Sigilweaver/OpenWRaw#24).
 
 ## Companion Chromatogram Files
 
-For each data record in `_CHROMS.INF` there is a corresponding `_CHROnnnn.DAT` file
-numbered 1-based with 3-digit zero-padding (e.g., `_CHRO001.DAT` for record 0). The `.DAT` files contain the
-time-series intensity data for each channel. The encoding of `_CHROnnnn.DAT` is not
-yet decoded (but see `$CC$` scale factor for a clue to the units conversion).
+For each channel record in `_CHROMS.INF` there is a corresponding `_CHROnnnn.DAT` file
+numbered 1-based with 3-digit zero-padding (e.g., `_CHRO001.DAT` for record 0). The `.DAT` files contain decoded pairs of retention time and channel value;
+see [08 - _CHROnnnn.DAT](08-chro-dat.md).
 
 ## Reference Sources
 
 - Empirical hex analysis using `re/src/analysis/inspect.py`
 - Corpus samples:
-  - PXD068881/20220517_CtpA_1076_2h_1.raw (7 records, 723 bytes)
-  - PXD075602/DHPR_11257-1.raw (5 records, 553 bytes)
+  - PXD068881/20220517_CtpA_1076_2h_1.raw (7 channels, 723 bytes)
+  - PXD075602/DHPR_11257-1.raw (5 channels, 553 bytes)
+
+The one-channel public sources and the corrected descriptor interpretation are
+recorded in [ATTRIBUTION.md](https://github.com/Sigilweaver/OpenWRaw/blob/main/ATTRIBUTION.md).

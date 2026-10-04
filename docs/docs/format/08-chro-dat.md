@@ -52,31 +52,29 @@ varies accordingly.
 
 ## CHRO File Numbering
 
-CHRO files are numbered 1-based and correspond to ALL records in
-`_CHROMS.INF` (both meta and data records, in order). The first two CHRO
-files correspond to the "Flags" and "Description" meta records.
+CHRO files are numbered 1-based and correspond to the 85-byte channel records
+in `_CHROMS.INF`, starting immediately after its 128-byte descriptor header.
+The Flags and Description descriptors are fields inside that header and do
+not have companion CHRO files.
 
-| CHROMS.INF record index | CHRO file | Notes |
-|------------------------|-----------|-------|
-| 0 (meta, type=1, "Flags") | `_CHRO001.DAT` | Abstract channel |
-| 1 (meta, type=2, "Description") | `_CHRO002.DAT` | Abstract channel |
-| 2 (first data record) | `_CHRO003.DAT` | First physical channel |
-| 3 (second data record) | `_CHRO004.DAT` | Second physical channel |
-| ... | ... | |
+| CHROMS.INF channel index | CHRO file |
+|-------------------------|-----------|
+| 0 | `_CHRO001.DAT` |
+| 1 | `_CHRO002.DAT` |
+| 2 | `_CHRO003.DAT` |
 
 ## Observed Values
 
 | File | Dataset | Channel | n_records | RT range (min) | Value range |
 |------|---------|---------|-----------|----------------|-------------|
-| CHRO001 | CtpA.raw | (meta Flags) | 7201 | 0.002-12.002 | 4753-6782 |
-| CHRO002 | CtpA.raw | (meta Desc) | 721 | 0.017-12.017 | 94.7-95.0 (%) |
-| CHRO001 | DHPR_11257-1.raw | BSM Flow Rate B | 18001 | 0.002-30.006 | 3580-3650 (µL/min) |
-| CHRO002 | DHPR_11257-1.raw | Column Temp | 1801 | 0.017-30.016 | 4.8-5.0 (°C) |
+| CHRO001 | CtpA.raw | BSM System Pressure | 7201 | 0.002-12.002 | 4753-6782 |
+| CHRO002 | CtpA.raw | BSM Composition A | 721 | 0.017-12.017 | 94.7-95.0 (%) |
 
-Note: the CHRO001 values for CtpA (~6782) appear to represent BSM system
-pressure (psi), suggesting the meta "Flags" channel may record a real
-physical channel not listed in the CHROMS.INF data records. The exact
-mapping for meta record channels is not yet confirmed.
+The first channel in the public 213-byte PSU metadata file is column
+temperature. Its `_CHRO001.DAT` has 900 points, starting at 0 minutes with
+approximately 40 degrees C, consistent with the channel name and units.
+The four-channel MTBLS701 LCT Premier acquisition maps pressure, composition,
+sample temperature and column temperature to CHRO001..CHRO004 in that order.
 
 ## Units Lookup
 
@@ -87,5 +85,5 @@ for the `$CC$` parsing rules.
 ## Reference Sources
 
 - Corpus samples:
-  - PXD068881/20220517_CtpA_1076_2h_1.raw (7 CHRO files, 5 data channels)
-  - PXD075602/DHPR_11257-1.raw (5 CHRO files, 3 data channels)
+  - PXD068881/20220517_CtpA_1076_2h_1.raw (7 CHRO files, 7 channels)
+  - PXD075602/DHPR_11257-1.raw (5 CHRO files, 5 channels)

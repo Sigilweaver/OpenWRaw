@@ -7,17 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-04
+
 ### Fixed
 
+- Accept valid 213-byte, one-channel `_CHROMS.INF` files and preserve the
+  first two channels in larger files. Field descriptors are inside the
+  128-byte header; channel 0 now correctly maps to `_CHRO001.DAT`.
+  Reproduced from original public Waters acquisitions without vendor software
+  (issue #36).
 - Decode 12-byte LCT Premier mass records from original public MTBLS701 and
   MTBLS13770 acquisitions instead of treating them as 6-byte Encoding A.
   Intensity flags and the auxiliary word remain uninterpreted; flagged peaks
-  are preserved. The 213-byte `_CHROMS.INF` report in #36 remains unresolved.
+  are preserved.
 
 ### Changed
 
-- Rust `Encoding` adds variant `E`; exhaustive matches must handle it.
+- **Breaking (Rust):** public `Encoding` adds variant `E`; downstream
+  exhaustive matches must handle it. This requires a major crate release.
+  The Python package shares version 4.0.0, with an additive encoding value.
   Python `function_encoding` can return `"e"` for 12-byte LCT records.
+
+### Known limitations
+
+- The exact LCT Premier XE file reported in issue #36 has not been seen.
+  The 213-byte metadata defect was reproduced on public SYNAPT and Xevo
+  acquisitions, with the same descriptor layout independently confirmed on
+  a public LCT Premier acquisition.
+- A separate public PSU SYNAPT acquisition has scan slices incompatible
+  with its selected 8-byte encoding. Its channels work, but spectrum
+  decoding fails. This release does not claim support for that scan layout.
 
 ## [3.0.0] - 2026-09-28
 
