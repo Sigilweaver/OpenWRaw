@@ -8,8 +8,10 @@ use std::path::Path;
 
 const HEADER_SIZE: usize = 128;
 const RECORD_SIZE: usize = 85;
-/// Number of meta records that always precede the data records.
-const N_META: usize = 2;
+// Two 48-byte field descriptors follow the 32-byte preamble inside the header.
+const PREAMBLE_SIZE: usize = 32;
+const DESCRIPTOR_SIZE: usize = 48;
+const N_DESCRIPTORS: usize = 2;
 
 /// CHRO file header size (preamble + 2 descriptor records).
 const CHRO_DATA_OFFSET: usize = 128;
@@ -17,7 +19,7 @@ const CHRO_DATA_OFFSET: usize = 128;
 /// Description of a single recorded chromatographic channel from `_CHROMS.INF`.
 #[derive(Debug, Clone)]
 pub struct ChromChannel {
-    /// 0-based index among data records only (meta records excluded).
+    /// 0-based index among channel records.
     pub index: usize,
     /// Source device type: 4 = BSM pump, 1 = column/sample device.
     pub source_type: u32,
@@ -44,7 +46,7 @@ impl ChromsInf {
 
     /// Parse from an in-memory byte slice (useful for testing).
     pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
-        let min_size = HEADER_SIZE + N_META * RECORD_SIZE;
+        let min_size = HEADER_SIZE;
         if bytes.len() < min_size {
             return Err(crate::Error::Parse(format!(
                 "_CHROMS.INF too small: {} bytes (need at least {})",
@@ -60,11 +62,18 @@ impl ChromsInf {
             )));
         }
 
-        let n_meta = crate::bytes::read_u16_le(bytes, 6)? as usize;
-        let data_start = HEADER_SIZE + n_meta * RECORD_SIZE;
-        if bytes.len() < data_start {
+        let data_start = crate::bytes::read_u16_le(bytes, 0)? as usize;
+        let version = crate::bytes::read_u16_le(bytes, 2)?;
+        let n_desc = crate::bytes::read_u16_le(bytes, 6)? as usize;
+        if version != 1 || n_desc != N_DESCRIPTORS {
             return Err(crate::Error::Parse(format!(
-                "_CHROMS.INF: file too small for declared {n_meta} meta records"
+                "_CHROMS.INF: unsupported version {version} or descriptor count {n_desc}"
+            )));
+        }
+        let expected_data_start = PREAMBLE_SIZE + n_desc * DESCRIPTOR_SIZE;
+        if data_start != expected_data_start {
+            return Err(crate::Error::Parse(format!(
+                "_CHROMS.INF: data offset {data_start} does not match descriptor header size {expected_data_start}"
             )));
         }
 
@@ -112,11 +121,10 @@ impl ChromsInf {
 
     /// Returns the 1-based CHRO file number for a given data record index (0-based).
     ///
-    /// CHRO files cover ALL records in `_CHROMS.INF` (meta + data) in order, numbered
-    /// from 1. The first two slots are always the meta records, so data record 0 maps
-    /// to `_CHRO0003.DAT` (index 3).
+    /// Channel records start immediately after the descriptor header, so channel
+    /// record 0 maps to `_CHRO001.DAT`.
     pub fn chro_number_for_channel(&self, channel_index: usize) -> usize {
-        N_META + channel_index + 1
+        channel_index + 1
     }
 }
 
@@ -216,22 +224,21 @@ mod tests {
 
     // -- Helpers --
 
-    fn make_header(n_meta: u16, n_data: usize) -> Vec<u8> {
+    fn make_header() -> Vec<u8> {
         let mut h = vec![0u8; HEADER_SIZE];
-        h[0..2].copy_from_slice(&128u16.to_le_bytes()); // header_size
-        h[2..4].copy_from_slice(&1u16.to_le_bytes()); // version
-        h[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes()); // record_size
-        h[6..8].copy_from_slice(&n_meta.to_le_bytes()); // n_meta
-        let _ = n_data; // used by caller to set file size
+        h[0..2].copy_from_slice(&(HEADER_SIZE as u16).to_le_bytes());
+        h[2..4].copy_from_slice(&1u16.to_le_bytes());
+        h[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes());
+        h[6..8].copy_from_slice(&(N_DESCRIPTORS as u16).to_le_bytes());
+        // The native public files place Flags and Description descriptors here,
+        // not in separate 85-byte records after the header.
+        h[32..38].copy_from_slice(&[1, 0, 2, 0, 0, 0]);
+        h[38..43].copy_from_slice(b"Flags");
+        h[64..66].copy_from_slice(&4u16.to_le_bytes());
+        h[80..86].copy_from_slice(&[2, 0, 5, 0, 4, 0]);
+        h[86..97].copy_from_slice(b"Description");
+        h[112..114].copy_from_slice(&81u16.to_le_bytes());
         h
-    }
-
-    fn make_meta_record(meta_type: u32, name: &str) -> Vec<u8> {
-        let mut r = vec![0u8; RECORD_SIZE];
-        r[0..4].copy_from_slice(&meta_type.to_le_bytes());
-        let n = name.len().min(80);
-        r[4..4 + n].copy_from_slice(&name.as_bytes()[..n]);
-        r
     }
 
     fn make_data_record(source_type: u32, name: &str, cc_spec: &str) -> Vec<u8> {
@@ -250,9 +257,7 @@ mod tests {
     }
 
     fn make_chroms_inf(n_data: usize) -> Vec<u8> {
-        let mut bytes = make_header(N_META as u16, n_data);
-        bytes.extend(make_meta_record(1, "Flags"));
-        bytes.extend(make_meta_record(2, "Description"));
+        let mut bytes = make_header();
         for i in 0..n_data {
             let cc = format!("$CC$,1.0,3,0,0,{}", if i == 0 { "psi" } else { "%" });
             bytes.extend(make_data_record(4, &format!("Channel {i}"), &cc));
@@ -272,6 +277,7 @@ mod tests {
     #[test]
     fn parse_single_channel() {
         let bytes = make_chroms_inf(1);
+        assert_eq!(bytes.len(), 213);
         let ci = ChromsInf::from_bytes(&bytes).unwrap();
         assert_eq!(ci.channels.len(), 1);
         assert_eq!(ci.channels[0].source_type, 4);
@@ -291,12 +297,11 @@ mod tests {
     }
 
     #[test]
-    fn chro_number_offset_is_meta_plus_one() {
+    fn chro_number_is_channel_plus_one() {
         let bytes = make_chroms_inf(5);
         let ci = ChromsInf::from_bytes(&bytes).unwrap();
-        // channel 0 → CHRO file 3 (meta 0, meta 1, then data records)
-        assert_eq!(ci.chro_number_for_channel(0), 3);
-        assert_eq!(ci.chro_number_for_channel(4), 7);
+        assert_eq!(ci.chro_number_for_channel(0), 1);
+        assert_eq!(ci.chro_number_for_channel(4), 5);
     }
 
     #[test]
@@ -314,6 +319,35 @@ mod tests {
     }
 
     #[test]
+    fn truncated_channel_record_is_error() {
+        let mut bytes = make_chroms_inf(1);
+        bytes.pop();
+        assert!(ChromsInf::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn descriptor_count_is_not_a_channel_count() {
+        for n_channels in [0, 1, 2, 4, 7] {
+            let bytes = make_chroms_inf(n_channels);
+            let ci = ChromsInf::from_bytes(&bytes).unwrap();
+            assert_eq!(ci.channels.len(), n_channels);
+            for (index, channel) in ci.channels.iter().enumerate() {
+                assert_eq!(channel.name, format!("Channel {index}"));
+                assert_eq!(ci.chro_number_for_channel(index), index + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_descriptor_header_is_error() {
+        for (offset, value) in [(0, 32u16), (0, 213), (2, 2), (6, 0), (6, u16::MAX)] {
+            let mut bytes = make_chroms_inf(1);
+            bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+            assert!(ChromsInf::from_bytes(&bytes).is_err());
+        }
+    }
+
+    #[test]
     fn windows1252_units_decoded_correctly() {
         // Build a record with µ (0xB5) and ° (0xB0) in the units.
         let mut r = vec![0u8; RECORD_SIZE];
@@ -326,9 +360,7 @@ mod tests {
         let cc_start = name.len() + 1;
         payload[cc_start..cc_start + cc.len()].copy_from_slice(&cc);
 
-        let mut bytes = make_header(N_META as u16, 0);
-        bytes.extend(make_meta_record(1, "Flags"));
-        bytes.extend(make_meta_record(2, "Description"));
+        let mut bytes = make_header();
         bytes.extend(r);
         let ci = ChromsInf::from_bytes(&bytes).unwrap();
         assert_eq!(ci.channels[0].units, "\u{00B5}L/min"); // µL/min
@@ -404,10 +436,10 @@ mod tests {
         if !raw.exists() {
             return;
         }
-        // PXD068881: 5 data channels, file = 723 bytes
+        // PXD068881: 7 channel records, file = 723 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
-        assert_eq!(ci.channels.len(), 5, "CtpA should have 5 data channels");
-        // channel 0: BSM Composition B, source_type=4
+        assert_eq!(ci.channels.len(), 7, "CtpA should have 7 channels");
+        // channel 0: BSM System Pressure, source_type=4
         assert_eq!(ci.channels[0].source_type, 4);
         assert!(
             ci.channels[0].name.contains("BSM"),
@@ -419,8 +451,8 @@ mod tests {
             assert!(!ch.units.is_empty(), "channel {} has empty units", ch.name);
         }
         // CHRO file numbering
-        assert_eq!(ci.chro_number_for_channel(0), 3);
-        assert_eq!(ci.chro_number_for_channel(4), 7);
+        assert_eq!(ci.chro_number_for_channel(0), 1);
+        assert_eq!(ci.chro_number_for_channel(6), 7);
     }
 
     #[test]
@@ -430,9 +462,9 @@ mod tests {
         if !raw.exists() {
             return;
         }
-        // _CHRO003.DAT = first data channel (BSM Composition B, channel index 0)
+        // _CHRO001.DAT = first channel (BSM System Pressure, channel index 0)
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
-        let chro_num = ci.chro_number_for_channel(0); // = 3
+        let chro_num = ci.chro_number_for_channel(0); // = 1
         let pts = read_chro_dat(&raw.join(format!("_CHRO{chro_num:03}.DAT"))).unwrap();
         assert!(!pts.is_empty(), "should have time-series data");
         // RT should be monotonically non-decreasing and within run duration.
@@ -451,9 +483,9 @@ mod tests {
         if !raw.exists() {
             return;
         }
-        // PXD075602: 3 data channels, file = 553 bytes
+        // PXD075602: 5 channel records, file = 553 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
-        assert_eq!(ci.channels.len(), 3, "DHPR should have 3 data channels");
-        assert_eq!(ci.chro_number_for_channel(0), 3);
+        assert_eq!(ci.channels.len(), 5, "DHPR should have 5 channels");
+        assert_eq!(ci.chro_number_for_channel(0), 1);
     }
 }

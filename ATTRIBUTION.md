@@ -46,6 +46,32 @@ Raw files are kept outside version control and are not redistributed.
 MTBLS701 exposes EMBL-EBI Terms of Use; MTBLS13770 explicitly exposes CC0 1.0.
 Per-study terms apply. Please cite the original studies when using the data.
 
+## Chromatogram descriptor evidence (issue #36)
+
+The corrected `_CHROMS.INF` layout was derived from native public side-file
+bytes, without vendor tools, SDKs, converted spectra, or contributor uploads.
+Files were fetched on 2026-10-04 and kept outside tracked source.
+
+| Source | Native bundle | Metadata size | SHA-256 of `_CHROMS.INF` |
+|--------|---------------|---------------|--------------------------|
+| [PSU Data Commons](https://www.datacommons.psu.edu/download/metabolomics/WAS/kt130808_WAS_0179.raw/) | kt130808_WAS_0179.raw, SYNAPT G2-S | 213 | `8c1327a558139626a59e68b2594e67e66a5f92d8c4792e31de983a241d1a8287` |
+| [PSU Data Commons](https://www.datacommons.psu.edu/download/metabolomics/limin/ZLM130522_tcdf_urine_309.raw/) | ZLM130522_tcdf_urine_309.raw, SYNAPT G2-S | 213 | `8c1327a558139626a59e68b2594e67e66a5f92d8c4792e31de983a241d1a8287` |
+| [MassIVE MSV000083877](https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?task=a66ade995ac8431e80f6e27f11c55674) | ROF_181101_04_IgG.raw, Xevo G2 QTof | 213 | `e656a9f4616552fea6ada19b13e0d45b15d82f29211ae4b2e088d24a9e11093d` |
+
+MassIVE lists MSV000083877 under CC0 1.0. PSU download listings do not
+establish a redistribution license; their raw files are not redistributed.
+These files reproduce the reported size and parser error, but are not LCT
+Premier XE acquisitions and do not prove the reporter's exact file layout.
+
+The public MTBLS701 LCT Premier acquisition
+`1506_SZ_SZ_E01_neg.raw` independently confirms four channel records after
+the same descriptor header. PXD068881
+`20220517_CtpA_1076_2h_1.raw` confirms seven channels. The preamble values
+are `[128, 1, 85, 2]`; the final value counts 48-byte Flags/Description
+field descriptors within the header, not 85-byte records after it.
+Corresponding native CHRO time series were checked for finite values,
+ordered retention times and one-to-one channel numbering.
+
 ## Third-party Rust dependencies
 
 The OpenWRaw core (`openwraw`) crate has no

@@ -133,7 +133,9 @@ a common "parameter table" structure:
 [n_records * record_size bytes of data]
 ```
 
-_CHROMS.INF uses a 128-byte header + 85-byte records (different stride).
+_CHROMS.INF uses the same 32-byte preamble and two 48-byte field
+descriptors (128 bytes total), followed by 85-byte channel records.
+Its descriptor count is not a count of records to skip after the header.
 
 ## Known Instrument Generations
 
