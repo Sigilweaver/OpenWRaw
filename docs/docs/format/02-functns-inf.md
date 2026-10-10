@@ -20,7 +20,7 @@ All unlisted byte positions are zero in the entire corpus.
 
 | Offset | Size | Type | Confirmed | Description |
 |--------|------|------|-----------|-------------|
-| 0x000  | 1    | u8   | Yes       | function_type_code: 0x12 (=18) in all corpus records; consistent with Waters SDK "TOF MS" category |
+| 0x000  | 1    | u8   | Yes       | function_type_code: 0x12 (=18) in all corpus records, all of which are TOF acquisitions |
 | 0x001  | 1    | u8   | Partial   | scan_subtype: 0x25 = older non-IMS QTOF; 0x71 = G2-Si/G2-XS survey; 0xf1 = G2-Si/G2-XS lock-mass reference (= 0x71 | 0x80) |
 | 0x002  | 4    | f32  | Yes       | cycle_contribution (s) = scan_time + interscan_delay; confirmed as scan_time + interscan_delay for all 9 records |
 | 0x006  | 4    | f32  | Yes       | interscan_delay (s), duplicate of 0x01C |
@@ -94,8 +94,8 @@ Polarity cannot be confirmed from the available corpus (all positive-mode data).
 
 ## Undecoded
 
-- Exact semantics of function_type_code 0x12 (consistent with Waters SDK enum
-  value 18 = "TofMS" but cannot be confirmed without non-TOF corpus data)
+- Exact semantics of function_type_code 0x12 (every corpus record is a TOF
+  acquisition and carries 0x12; other values need non-TOF corpus data)
 - Byte 0x017 purpose (polarity vs data format flag)
 - Bytes 0x012-0x013, 0x014-0x016, 0x018-0x01B (all zero in corpus)
 - IMS-specific method parameters (wave velocity, trap bias, transfer bias) are not
