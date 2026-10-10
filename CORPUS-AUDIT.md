@@ -18,7 +18,7 @@ Vion/UNIFI lock mass was off by up to 3,400 ppm.
 | --- | ---: |
 | Bundles opened and fully decoded | 80/80 |
 | Non-lock-mass scans decoded | 250,236/250,236 |
-| Scans with at least one peak | 215,939 |
+| Scans with at least one peak | 217,405 |
 | Scan errors | 0 |
 
 ## m/z accuracy on lock-mass functions
