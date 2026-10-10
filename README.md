@@ -82,7 +82,11 @@ quickstart, guide, and format specification.
   `_HEADER.TXT`. Lock-mass functions are skipped when iterating spectra and
   are not used to correct the others. Across the public test corpus the
   uncorrected lock-mass reference sits within about 75 ppm for most
-  bundles and up to about 160 ppm for a few.
+  bundles. Three lock-mass functions exceed the 100 ppm audit gate:
+  PXD001175 `S121126_06.raw` (+162 ppm), PXD069628 `HC20_CE` (-108 ppm)
+  and PXD029515 `blast_young_0h_H1__MSMS.raw` (-153 ppm). Their offsets are
+  uniform across the reference peak and its isotopes; the cause is not
+  established.
 - Encoding E (12-byte records) intensity flag bits and auxiliary word are
   not interpreted; flagged peaks are kept.
 

@@ -4,19 +4,6 @@ sidebar_position: 3
 
 # Quickstart
 
-## CLI
-
-```sh
-# Inspect a .raw directory
-openwraw inspect path/to/sample.raw
-
-# Convert all MS functions to mzML
-openwraw convert path/to/sample.raw -o output.mzML
-
-# Convert a single function
-openwraw convert path/to/sample.raw -o output.mzML --function 1
-```
-
 ## Rust
 
 ```rust
@@ -47,6 +34,18 @@ for scan in reader.iter_spectra() {
 
 m/z is calibrated with the polynomial in `_HEADER.TXT`; no lock-mass
 correction is applied. Ion mobility is not decoded.
+
+## mzML (Rust)
+
+OpenWRaw is a library and ships no command-line tool. To convert a bundle
+to indexed mzML from Rust:
+
+```rust
+let mut out = std::io::BufWriter::new(std::fs::File::create("output.mzML")?);
+openwraw::mzml::write_indexed_mzml("sample.raw", &mut out)?;
+```
+
+Lock-mass functions are not written, and spectra carry no mobility arrays.
 
 ## Python
 

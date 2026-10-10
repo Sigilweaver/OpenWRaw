@@ -149,19 +149,11 @@ field `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
 functions (both targeted and MSe) comes from a separate file - see
 [07 - _FUNCnnn.STS](07-func-sts.md)'s "Collision Energy" channel.
 
-`Start Mass` / `End Mass` were previously decoded into
-`ExternFunction::start_mass_da` / `end_mass_da`, but the field was never read
-anywhere outside its own module's tests - spectrum decoding has always used
-`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high` exclusively, and the
-corpus never established whether the two pairs are aliases, bounds with
-different meanings, or which source should take precedence when they differ.
-The `_extern.inf` parser also never handled the `MSMS End Mass` key that
-`TOF MSMS FUNCTION` sections use instead of `End Mass` (see
-`crates/openwraw/src/raw/extern_inf.rs`'s `EXTERN_PXD035818_MSMS` test
-fixture), so `end_mass_da` silently stayed `0.0` for every targeted-MS/MS
-function - not a reliable value to promote to a decode cross-check. Given
-both the missing consumer and the parsing gap, the fields were removed
-rather than wired in (Sigilweaver/OpenWRaw#24).
+`Start Mass` / `End Mass` are not decoded. Spectrum decoding uses
+`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high`. The corpus has not
+established whether the two pairs are aliases or bounds with different
+meanings, and `TOF MSMS FUNCTION` sections use an `MSMS End Mass` key
+instead of `End Mass` (Sigilweaver/OpenWRaw#24).
 
 ## Version Line
 

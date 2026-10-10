@@ -61,11 +61,6 @@ acquisition range in `_FUNCTNS.INF`: in PXD058812 `70 CA FF C7` is
 `0xF9FF4A * 2^-13 = 1999.98` for a 100-2000 function. The decoder rejects
 records whose low nibble is non-zero or whose mantissa is not normalized.
 
-Earlier versions read byte 2 as a "block type", byte 3 as an 8-bit intensity
-and bytes 4-5 as a TOF bin anchored to `mz_high`. That reading put peaks
-outside the acquisition range (for example 820-3312 in a 100-2000 function)
-and is superseded.
-
 ### Validation (clean-room)
 
 - Every record in six bundles has a zero low nibble and a normalized

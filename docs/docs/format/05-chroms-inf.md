@@ -94,7 +94,7 @@ $CC$,<scale_f>,<type_code>,<lo_limit>,<hi_limit>,<units>
 | 5      | 1 (col/samp)| (1) Peltier Engine Power | % Power |
 | 6      | 1 (col/samp)| (1) Chamber Temp         | °C |
 
-### Previously Documented Channel Subset (PXD075602 DHPR_11257-1.raw)
+### Flow and Temperature Channels (PXD075602 DHPR_11257-1.raw)
 
 The following three channels are records 2..4 of the five-channel file.
 

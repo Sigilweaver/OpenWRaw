@@ -8,9 +8,8 @@ confused:
 2. **m/z accuracy**: do lock-mass (reference) functions show their reference
    compound where it belongs?
 
-A scan that parses is not necessarily a correct spectrum. An earlier version
-of this report counted parse coverage alone as a 100% success rate while the
-Vion/UNIFI lock mass was off by up to 3,400 ppm.
+A scan that parses is not necessarily a correct spectrum, so both are
+reported.
 
 ## Parse coverage
 
