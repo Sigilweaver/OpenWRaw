@@ -105,6 +105,10 @@ def test_read_spectrum(raw_bundle):
         assert "Spectrum(" in repr(spec)
 
 
+def test_version():
+    assert openwraw.__version__.count(".") == 2
+
+
 def test_no_ion_mobility_api():
     # Ion mobility is not decoded, so the bindings expose no drift-time API.
     assert not hasattr(openwraw, "ImsSpectrum")

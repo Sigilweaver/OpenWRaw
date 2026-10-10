@@ -830,6 +830,7 @@ impl RawReader {
 
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<RecordIter>()?;
     // Forward Rust `log` records to Python `logging` under the "openwraw"
     // logger hierarchy. Records below the configured Python level are
