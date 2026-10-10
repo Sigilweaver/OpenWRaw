@@ -136,7 +136,7 @@ Key per-function fields:
 | `End Time (mins)` | min | Acquisition end retention time |
 | `Scan Time (sec)` | s | Duration of one scan |
 | `Interscan Time (sec)` | s | Dead time between scans |
-| `Data Format` | - | `Continuum` or `Centroid` |
+| `Data Format` | - | `Continuum` or `Centroid`. Not parsed. Every function in the corpus that declares it says `Continuum`, including lock-mass functions whose DAT holds centroids (see `_FUNCnnn.DAT`, "Profile or centroid") |
 | `Analyser` | - | `Resolution Mode` or `Sensitivity Mode` |
 | `ADC Sample Frequency (GHz)` | GHz | ADC sampling rate |
 | `ADC Pusher Frequency (µs)` | µs | Per-function pusher cycle override (if set) |

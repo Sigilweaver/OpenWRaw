@@ -51,8 +51,9 @@ decoder emits the former after removing sentinel and zero-intensity records;
 it does not centroid, so its output count and `peak_count` measure different
 things and an equality check would reject valid corpus scans.
 
-What does hold, and is what `Reader::decode_scan` checks (as a
-`debug_assert!`, `check_peak_count_sanity` in `reader.rs`): a centroid count
+What does hold, and is what `Reader::decode_scan` checks
+(`check_peak_count_sanity` in `reader.rs`, which logs a warning when it
+fails): a centroid count
 can never exceed the raw decoded record count, since every centroid is built
 from at least one raw point. `peak_count <= decoded_len` is therefore a cheap
 decode sanity check - it catches a decode that produced implausibly few

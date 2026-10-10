@@ -465,10 +465,21 @@ pub fn record_from_scan(
         collision_energy_ev,
         etd_fragmentation_mode,
     );
+    let function = reader.functions.iter().find(|f| f.index == function_index);
+    // Profile or centroid follows the record encoding; see
+    // `Encoding::is_centroided`. A function the reader does not list has no
+    // known encoding, so no representation is claimed.
+    let scan_mode = function.map(|f| {
+        if f.encoding.is_centroided() {
+            msc::ScanMode::Centroid
+        } else {
+            msc::ScanMode::Profile
+        }
+    });
     let mut extra = ::std::collections::BTreeMap::new();
     extra.insert("openwraw.function_index".into(), function_index.to_string());
     extra.insert("openwraw.scan_index".into(), scan_idx.to_string());
-    if let Some(function) = reader.functions.iter().find(|f| f.index == function_index) {
+    if let Some(function) = function {
         if let Some(sts) = &function.sts {
             for channel in sts.channels() {
                 if let Some(value) = sts.value_at(channel, scan_idx) {
@@ -488,7 +499,7 @@ pub fn record_from_scan(
         native_id: native_id_for(function_index, scan_idx),
         ms_level,
         polarity: polarity_for(reader, function_index),
-        scan_mode: Some(msc::ScanMode::Centroid),
+        scan_mode,
         analyzer: Some(msc::Analyzer::TOFMS),
         filter: None,
         retention_time_sec: retention_time_min as f64 * 60.0,
@@ -830,6 +841,26 @@ mod tests {
         assert!(reader.decode_scan(1, 0).is_err());
         let mut source = WatersSource::new(reader);
         assert_eq!(source.iter_spectra().count(), 0);
+    }
+
+    #[test]
+    fn scan_mode_follows_encoding() {
+        let reader = reader_with_functions(&[(Encoding::A, 0), (Encoding::D, 0), (Encoding::E, 0)]);
+        let mode = |function_index| {
+            let scan = DecodedScan {
+                function_index,
+                scan_idx: 0,
+                retention_time_min: 0.0,
+                spectrum: Default::default(),
+                collision_energy_ev: None,
+                etd_fragmentation_mode: None,
+            };
+            record_from_scan(&reader, 1, scan).scan_mode
+        };
+        assert_eq!(mode(1), Some(msc::ScanMode::Profile));
+        assert_eq!(mode(2), Some(msc::ScanMode::Profile));
+        assert_eq!(mode(3), Some(msc::ScanMode::Centroid));
+        assert_eq!(mode(9), None);
     }
 
     #[test]

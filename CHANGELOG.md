@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public corpus. It is now found with its 13C isotope in 17 (the other
   holds no known lock compound): 14 within 76 ppm and 3 at 98-162 ppm,
   with no lock-mass correction applied.
+- Spectra are labelled profile or centroid from their encoding instead of
+  centroid for every scan: Encodings A and D (profile points one sample
+  apart) are profile, Encoding E (one point per peak) is centroid.
+- The Python module defines `__version__`, which the install guide uses.
 - Drift times are no longer reported. The value reported as
   `drift_time_ms` was the low 16 bits of the m/z word. Spectra carry no
   mobility array and runs declare no mobility array kind.

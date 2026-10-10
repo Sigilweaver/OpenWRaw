@@ -73,6 +73,23 @@ pub enum Encoding {
     E,
 }
 
+impl Encoding {
+    /// Whether this encoding stores centroids rather than profile points.
+    ///
+    /// Encodings A and D store profile data: peaks span runs of points one
+    /// sample apart. Encoding E stores isolated, irregularly spaced points
+    /// (one per peak) in the corpus functions that use it behind the 30-byte
+    /// index; the LCT Premier functions behind the 22-byte index share its
+    /// record layout and are treated the same, which the public corpus has
+    /// not confirmed from their point spacing (`docs/format/04-func-dat.md`).
+    pub fn is_centroided(self) -> bool {
+        match self {
+            Encoding::A | Encoding::D => false,
+            Encoding::E => true,
+        }
+    }
+}
+
 /// One acquisition function's static metadata, ready for decoding.
 #[derive(Debug, Clone)]
 #[non_exhaustive]

@@ -88,7 +88,9 @@ quickstart, guide, and format specification.
   uniform across the reference peak and its isotopes; the cause is not
   established.
 - Encoding E (12-byte records) intensity flag bits and auxiliary word are
-  not interpreted; flagged peaks are kept.
+  not interpreted; flagged peaks are kept. Encoding E spectra are labelled
+  centroid. That is confirmed from point spacing for the Xevo G2-XS
+  lock-mass functions but not for LCT Premier bundles.
 
 ## Debug logging
 
