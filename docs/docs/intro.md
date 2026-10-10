@@ -43,7 +43,7 @@ Optional Python bindings are available via the
 | Lock-mass correction                            | not applied |
 | `_CHROMS.INF` + `_CHROnnnn.DAT` chromatograms   | supported  |
 | mzML export                                     | supported  |
-| Apex3D `.bin` files                             | best-effort|
+| Apex3D `.bin` files, `_PROCnnn` files            | not read   |
 
 Validated instrument classes:
 
