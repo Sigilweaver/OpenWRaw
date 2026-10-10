@@ -481,7 +481,7 @@ pub enum DecodedSpectrum {
 /// fields read straight from the `.IDX` file. An offset past the end of the
 /// paired `.DAT` file, or (Variant B) a next offset that goes backwards or
 /// past the end, is rejected with an error instead of decoding bytes that do
-/// not belong to the scan. Variant A's `length` is still capped against
+/// not belong to the scan. Variant A's `length` is capped against
 /// `entry.dat_size` (the real, already-known size of the `.DAT` file): an
 /// IDX record claiming a scan larger than the DAT file that actually exists
 /// must not be able to force an allocation sized from unvalidated
@@ -612,11 +612,11 @@ mod tests {
 
     // A corrupt/malicious IDX can claim a scan far larger than the real DAT
     // file: dat_offset=0 for this scan, dat_offset=u32::MAX-1 for the "next"
-    // scan used to compute Variant B's length by subtraction. Before this
-    // was checked, `read_slice` would allocate a `Vec` sized from that
-    // difference (up to ~4.29 GB) regardless of how small the real DAT file
-    // on disk actually is - which aborts the process under a virtual-memory
-    // limit rather than returning a recoverable error.
+    // scan used to compute Variant B's length by subtraction. `scan_slice`
+    // must reject it: passing that difference (up to ~4.29 GB) to `read_slice`
+    // would allocate a `Vec` sized from it regardless of how small the real
+    // DAT file is, which aborts the process under a virtual-memory limit
+    // rather than returning a recoverable error.
     #[test]
     fn variant_b_next_offset_beyond_dat_size_is_error() {
         let entry = entry_with(

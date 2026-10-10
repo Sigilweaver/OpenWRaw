@@ -37,7 +37,7 @@ Format: `(marker << 24) | n_records`.
 
 The lower 24 bits count DAT records. PXD041695 has scans with more than 65,535
 records, so reading only the lower 16 bits truncates them. The high byte is
-0x18 in the earlier corpus and 0x4c/0x08 in the public LCT mass/lock
+0x18 in the other observed functions and 0x4c/0x08 in the public LCT mass/lock
 functions. DAT records may be 6, 8 or 12 bytes; consecutive DAT offsets
 establish the width. Those offsets also establish scan boundaries directly.
 At sizes divisible by both 22 and 30, these known markers and ordered DAT
@@ -91,13 +91,13 @@ Key facts:
 | 0x1A   | u32  | **Yes**   | Byte offset into .DAT file, high 32 bits (0 while the DAT is under 4 GiB) |
 
 The DAT offset is a 64-bit little-endian value at +0x16..+0x1E. Most DAT
-files are under 4 GiB, so the high word at +0x1A is usually 0, which is why
-earlier notes described it as always 0. Functions with a larger DAT set it
-once the offset crosses 4 GiB: in PXD045625 `Abu_190520_Sha11.raw`,
-`_FUNC001.IDX` scan 2699 has low word 1,626,312 and high word 1
-(offset 4,296,593,608). A corpus sweep found three such functions
-(7.0 GB, 5.9 GB and 4.5 GB DAT files) and 2,708 affected scans. Reading
-only the low word wraps the offset back to the start of the file.
+files are under 4 GiB, so the high word at +0x1A is usually 0. Functions
+with a larger DAT set it once the offset crosses 4 GiB: in PXD045625
+`Abu_190520_Sha11.raw`, `_FUNC001.IDX` scan 2699 has low word 1,626,312
+and high word 1 (offset 4,296,593,608). Three corpus functions (7.0 GB,
+5.9 GB and 4.5 GB DAT files) have offsets past 4 GiB, covering 2,708
+scans. Reading only the low word wraps the offset back to the start of the
+file.
 
 Validated: sum of (IDX[i+1].offset - IDX[i].offset) for all i = DAT file size exactly.
 Offsets are non-decreasing and never exceed the DAT size in the corpus; the
@@ -118,7 +118,7 @@ Predicted value = n_pushes x (pusher_period_us x 800):
 | CtpA    | 4317     | 93299               | 116.6 us                 |
 
 DHPR result (60.6 us) is consistent with the FUNCTNS.INF-derived 60.25 us pusher period.
-WANG result (35.0 us) corrects the previous 69 us estimate from tof_depth alone.
+WANG result (35.0 us) differs from the 69 us implied by tof_depth alone.
 CtpA (116.6 us) is anomalously long; may reflect a different acquisition mode.
 
 The 800 MHz figure is inferred; the actual clock rate is not confirmed from
