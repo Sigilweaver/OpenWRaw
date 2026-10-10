@@ -5,8 +5,9 @@
 //!
 //! * Parses `_HEADER.TXT`, `_FUNCTNS.INF`, `_extern.inf`.
 //! * Discovers every `_FUNCnnn.IDX` / `_FUNCnnn.DAT` pair on disk.
-//! * Picks an encoding (A / B / C / D / E) per function from IDX stride, DAT record
-//!   width, and instrument name (`SYNAPT*` indicates Encoding B IMS).
+//! * Picks an encoding (A / D / E) per function from the DAT record width:
+//!   the 22-byte index gives it through record counts and offsets, and for
+//!   the 30-byte index it is read from the position words of sampled scans.
 //! * Provides [`Reader::iter_spectra`] which yields one decoded spectrum
 //!   per scan, in `(function_index, scan_index_in_function)` order,
 //!   skipping lock-mass functions.
@@ -18,8 +19,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::raw::data::{
-    decode_encoding_a, decode_encoding_b, decode_encoding_c, decode_encoding_d, decode_encoding_e,
-    DecodeParams, ImsSpectrum, Spectrum,
+    decode_encoding_a, decode_encoding_d, decode_encoding_e, variant_b_record_width, DecodeParams,
+    Spectrum,
 };
 use crate::raw::extern_inf::ExternInf;
 use crate::raw::func_sts::FuncSts;
@@ -56,22 +57,25 @@ fn check_peak_count_sanity(
 }
 
 /// Which decoder applies to a given function's `_FUNCnnn.DAT`.
+///
+/// The encoding names the DAT record layout. It is independent of the index
+/// variant (`ScanIndex::A` or `ScanIndex::B`), except that Encoding A has
+/// only been seen with the 22-byte index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Encoding {
-    /// 6-byte records, sentinel-anchored. Variant A index.
+    /// 6-byte records (u16 ion count, floating-point m/z). Variant A index.
     A,
-    /// 8-byte IMS records (count, dt_bin, tof_bin). Variant B index.
-    B,
-    /// 8-byte non-IMS records (intensity, sub_bin, tof_bin). Variant B index.
-    C,
-    /// 8-byte records (16.16 intensity, floating-point m/z). Variant A index.
+    /// 8-byte records (16.16 intensity, floating-point m/z). Either index.
     D,
-    /// 12-byte records (compressed intensity, floating-point m/z, auxiliary word).
+    /// 12-byte records (compressed intensity, floating-point m/z, auxiliary
+    /// word). Either index.
     E,
 }
 
 /// One acquisition function's static metadata, ready for decoding.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FunctionEntry {
     /// 1-based function index.
     pub index: u32,
@@ -104,19 +108,14 @@ impl FunctionEntry {
 
     /// Build the [`DecodeParams`] needed for one of the `decode_encoding_*`
     /// primitives.
-    fn decode_params(&self, extern_inf: &ExternInf) -> DecodeParams {
-        DecodeParams {
-            a_us: extern_inf.a_us(),
-            cal: self.cal.clone(),
-            mz_low: self.info.mz_low as f64,
-            mz_high: self.info.mz_high as f64,
-            scan_time_ms: self.info.scan_time_s as f64 * 1000.0,
-        }
+    fn decode_params(&self) -> DecodeParams {
+        DecodeParams::new(self.cal.clone())
     }
 }
 
 /// A fully-parsed Waters `.raw/` bundle, ready to stream spectra.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Reader {
     pub dir: PathBuf,
     pub bundle_name: String,
@@ -141,7 +140,6 @@ impl Reader {
             .map_err(|e| e.with_context(format!("reading {}", functions_path.display())))?;
 
         let instrument = header.instrument.clone().unwrap_or_default();
-        let is_synapt = instrument.to_ascii_uppercase().starts_with("SYNAPT");
         log::debug!(
             "instrument {instrument:?}; Lteff {} mm, Veff {} V, pusher interval {}; \
              {} functions in _FUNCTNS.INF; T1 calibration for functions {:?}",
@@ -183,14 +181,32 @@ impl Reader {
                             .to_owned(),
                     ),
                 },
-                ScanIndex::B(_) if is_synapt => (
-                    Encoding::B,
-                    format!("30-byte index, instrument {instrument:?} starts with SYNAPT"),
-                ),
-                ScanIndex::B(_) => (
-                    Encoding::C,
-                    format!("30-byte index, instrument {instrument:?} is not SYNAPT"),
-                ),
+                ScanIndex::B(records) => {
+                    match sample_variant_b_width(&dat_path, records, dat_size)? {
+                        Some((12, scan)) => (
+                            Encoding::E,
+                            format!("30-byte index, 12-byte records judged from scan {scan}"),
+                        ),
+                        Some((_, scan)) => (
+                            Encoding::D,
+                            format!("30-byte index, 8-byte records judged from scan {scan}"),
+                        ),
+                        None => {
+                            log::warn!(
+                                "function {}: record width not established from sampled \
+                                 scans of {}; assuming 8-byte records",
+                                info.index,
+                                dat_path.display()
+                            );
+                            (
+                                Encoding::D,
+                                "30-byte index, record width not established from sampled \
+                                 scans; assuming 8-byte records"
+                                    .to_owned(),
+                            )
+                        }
+                    }
+                }
             };
             let cal = match header.cal_functions.get(&info.index) {
                 Some(cal) => cal.clone(),
@@ -318,19 +334,15 @@ impl Reader {
             entry.dat_path.display()
         );
         let bytes = read_slice(&entry.dat_path, offset, length)?;
-        let params = entry.decode_params(&self.extern_inf);
-        let decoded = match entry.encoding {
-            Encoding::A => DecodedSpectrum::Plain(decode_encoding_a(&bytes, &params)?),
-            Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
-            Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
-            Encoding::D => DecodedSpectrum::Plain(decode_encoding_d(&bytes, &params)?),
-            Encoding::E => DecodedSpectrum::Plain(decode_encoding_e(&bytes, &params)?),
+        let params = entry.decode_params();
+        let spectrum = match entry.encoding {
+            Encoding::A => decode_encoding_a(&bytes, &params)?,
+            Encoding::D => decode_encoding_d(&bytes, &params)?,
+            Encoding::E => decode_encoding_e(&bytes, &params)?,
         };
         // Only Encoding A's 6-byte records are known to relate to the IDX
         // `peak_count` this way (docs/format/03-func-idx.md).
-        if let (Encoding::A, ScanIndex::A(records), DecodedSpectrum::Plain(spectrum)) =
-            (entry.encoding, &entry.scan_index, &decoded)
-        {
+        if let (Encoding::A, ScanIndex::A(records)) = (entry.encoding, &entry.scan_index) {
             if let Some(rec) = records.get(scan_idx) {
                 check_peak_count_sanity(
                     function_index,
@@ -352,7 +364,7 @@ impl Reader {
             function_index,
             scan_idx,
             retention_time_min: rt_min,
-            spectrum: decoded,
+            spectrum,
             collision_energy_ev,
             etd_fragmentation_mode,
         })
@@ -415,8 +427,8 @@ fn index_end(scan_index: &ScanIndex, encoding: Encoding) -> Option<u64> {
     };
     let width = match encoding {
         Encoding::A => 6,
+        Encoding::D => 8,
         Encoding::E => 12,
-        _ => 8,
     };
     records
         .iter()
@@ -428,6 +440,36 @@ fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
     find_file(dir, name)?.ok_or_else(|| {
         crate::Error::Parse(format!("required file {name} missing in {}", dir.display()))
     })
+}
+
+/// Scans sampled, evenly spaced, when judging a Variant B record width.
+const VARIANT_B_WIDTH_SAMPLES: usize = 16;
+
+/// Judge the DAT record width of a 30-byte-index function from up to
+/// [`VARIANT_B_WIDTH_SAMPLES`] evenly spaced scans. Returns the width and the
+/// scan that decided it, or `None` when no sampled scan decides it.
+fn sample_variant_b_width(
+    dat_path: &Path,
+    records: &[crate::raw::index::ScanIndexB],
+    dat_size: u64,
+) -> crate::Result<Option<(u64, usize)>> {
+    let n = records.len();
+    let samples = n.min(VARIANT_B_WIDTH_SAMPLES);
+    for j in 0..samples {
+        let i = n * (2 * j + 1) / (2 * samples);
+        let start = records[i].dat_offset;
+        let end = records.get(i + 1).map_or(dat_size, |r| r.dat_offset);
+        // Out-of-range offsets are reported when the scan is decoded.
+        if start >= end || end > dat_size {
+            continue;
+        }
+        let bytes = read_slice(dat_path, start, end - start)
+            .map_err(|e| e.with_context(format!("sampling {}", dat_path.display())))?;
+        if let Some(width) = variant_b_record_width(&bytes) {
+            return Ok(Some((width, i)));
+        }
+    }
+    Ok(None)
 }
 
 /// The 22-byte index is paired with 6-byte, 8-byte and 12-byte DAT records.
@@ -448,12 +490,14 @@ fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u
 
 /// One scan after decoding.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct DecodedScan {
     pub function_index: u32,
     /// 0-based position within the function.
     pub scan_idx: usize,
     pub retention_time_min: f32,
-    pub spectrum: DecodedSpectrum,
+    /// Calibrated m/z and intensity. Ion mobility is not decoded.
+    pub spectrum: Spectrum,
     /// Per-scan collision energy (eV) from `_FUNCnnn.STS`'s "Collision
     /// Energy" channel, when the file is present and defines that channel.
     pub collision_energy_ev: Option<f64>,
@@ -461,15 +505,6 @@ pub struct DecodedScan {
     /// Fragmentation Mode" channel (seq 121): `0` for CID, non-zero for
     /// ETD, `None` when the file is absent or doesn't define the channel.
     pub etd_fragmentation_mode: Option<f64>,
-}
-
-/// Decoded payload of a scan; varies by encoding.
-#[derive(Debug, Clone)]
-pub enum DecodedSpectrum {
-    /// Output of Encoding A or C.
-    Plain(Spectrum),
-    /// Output of Encoding B (IMS).
-    Ims(ImsSpectrum),
 }
 
 /// Resolve the byte slice for scan `scan_idx` within `entry`'s DAT file.
@@ -507,8 +542,8 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
             }
             let width = match entry.encoding {
                 Encoding::A => 6,
+                Encoding::D => 8,
                 Encoding::E => 12,
-                _ => 8,
             };
             let length = (rec.n_records as u64) * width;
             (offset, length, rec.retention_time_min)
@@ -561,8 +596,6 @@ pub fn encoding_counts(reader: &Reader) -> BTreeMap<&'static str, usize> {
     for f in &reader.functions {
         let key = match f.encoding {
             Encoding::A => "A",
-            Encoding::B => "B",
-            Encoding::C => "C",
             Encoding::D => "D",
             Encoding::E => "E",
         };
@@ -596,7 +629,7 @@ mod tests {
         let encoding = if matches!(scan_index, ScanIndex::A(_)) {
             Encoding::A
         } else {
-            Encoding::C
+            Encoding::D
         };
         FunctionEntry {
             index: 1,

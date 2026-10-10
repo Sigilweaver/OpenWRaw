@@ -13,7 +13,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use openwraw::{DecodedSpectrum, FunctionEntry, Reader};
+use openwraw::raw::data::Spectrum;
+use openwraw::{FunctionEntry, Reader};
 
 /// Correctly decoded lock functions in the corpus sit within about 70 ppm
 /// before lock-mass correction (saturated reference peaks bias high);
@@ -56,11 +57,8 @@ fn bundles(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(found)
 }
 
-fn points(spectrum: DecodedSpectrum) -> (Vec<f64>, Vec<f32>) {
-    match spectrum {
-        DecodedSpectrum::Plain(s) => (s.mz, s.intensity),
-        DecodedSpectrum::Ims(s) => (s.mz, s.intensity),
-    }
+fn points(spectrum: Spectrum) -> (Vec<f64>, Vec<f32>) {
+    (spectrum.mz, spectrum.intensity)
 }
 
 /// `ReferenceMass1  1,556.27658` from the bundle's `_extern.inf`, if any.
@@ -79,7 +77,7 @@ fn declared_reference(dir: &Path) -> Option<f64> {
 type Bins = std::collections::BTreeMap<i64, (f64, f64)>;
 
 /// Sum profile points within 2 Da of `reference` into `BIN_DA` bins of
-/// (sum of m/z * intensity, sum of intensity). IMS drift cells collapse here.
+/// (sum of m/z * intensity, sum of intensity).
 fn bin_points(mz: &[f64], intensity: &[f32], reference: f64) -> Bins {
     let mut bins = Bins::new();
     for (&m, &i) in mz.iter().zip(intensity) {

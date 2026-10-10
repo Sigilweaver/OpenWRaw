@@ -4,12 +4,10 @@
 //! Frame -> spectrum projection:
 //!
 //! * One mzML spectrum per scan in each non-lock-mass function.
-//! * Encoding A / C (non-IMS QTof): peaks are emitted as-is.
-//! * Encoding B (SYNAPT IMS): every drift bin contributes its own peak,
-//!   with a parallel drift-time array emitted alongside m/z and intensity
-//!   (MS:1003007 "raw ion mobility array", milliseconds). The `pool_ims`
-//!   helper for m/z pooling stays available for downstream tools that
-//!   want a single spectrum per scan.
+//! * Every encoding: the decoded m/z and intensity points are emitted as-is.
+//!   No lock-mass correction is applied, and ion mobility is not decoded,
+//!   so spectra carry no mobility array and the run declares no mobility
+//!   array kind, including for SYNAPT mobility acquisitions.
 //! * Native ID format mirrors the de-facto Waters convention used by
 //!   ProteoWizard / Wiff2: `function=F process=0 scan=S` (1-based S).
 //! * Lock-mass / reference functions are skipped.
@@ -20,8 +18,7 @@ use std::path::Path;
 use openmassspec_core as msc;
 
 use crate::raw::chroms::{read_chro_dat, ChromsInf};
-use crate::raw::data::ImsSpectrum;
-use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Encoding, Reader};
+use crate::reader::{find_file, DecodedScan, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
 const SOFTWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -229,52 +226,10 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         acquisition_software_name: None,
         acquisition_software_version: None,
         start_timestamp,
-        mobility_array_kind: emits_mobility_arrays(reader)
-            .then_some(msc::MobilityArrayKind::DriftTimeMilliseconds),
+        // Ion mobility is not decoded, so no spectrum carries a mobility array.
+        mobility_array_kind: None,
         analyzers: Vec::new(),
     }
-}
-
-/// Whether any spectrum this reader exports carries a drift-time array.
-///
-/// Only Encoding B (SYNAPT IMS) decodes to [`DecodedSpectrum::Ims`], and
-/// `Reader::iter_spectra` skips lock-mass functions, so a run declares a
-/// mobility array kind only when a non-lock-mass Encoding B function exists.
-fn emits_mobility_arrays(reader: &Reader) -> bool {
-    reader
-        .functions
-        .iter()
-        .any(|f| f.encoding == Encoding::B && !f.info.is_lock_mass())
-}
-
-/// Pool an IMS scan's drift bins into a single MS spectrum.
-///
-/// Sorts the (m/z, intensity) pairs by m/z and sums intensities that fall
-/// on the same m/z bin (after the encoder's 1/65536 sub-bin resolution).
-/// Available for downstream tools that want a single MS spectrum per scan;
-/// the default export path emits the drift-resolved peaks instead.
-pub fn pool_ims(ims: &ImsSpectrum) -> (Vec<f64>, Vec<f32>) {
-    let n = ims.mz.len();
-    let mut pairs: Vec<(f64, f32)> = Vec::with_capacity(n);
-    for i in 0..n {
-        pairs.push((ims.mz[i], ims.intensity[i]));
-    }
-    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut mz: Vec<f64> = Vec::with_capacity(n);
-    let mut intensity: Vec<f32> = Vec::with_capacity(n);
-    for (m, i) in pairs {
-        if let Some(last_m) = mz.last_mut() {
-            if (*last_m - m).abs() < 1e-9 {
-                if let Some(last_i) = intensity.last_mut() {
-                    *last_i += i;
-                    continue;
-                }
-            }
-        }
-        mz.push(m);
-        intensity.push(i);
-    }
-    (mz, intensity)
 }
 
 fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
@@ -500,13 +455,7 @@ pub fn record_from_scan(
         collision_energy_ev,
         etd_fragmentation_mode,
     } = scan;
-    let (mz, intensity, mobility) = match spectrum {
-        DecodedSpectrum::Plain(s) => (s.mz, s.intensity, None),
-        DecodedSpectrum::Ims(ims) => {
-            let mob: Vec<f32> = ims.drift_time_ms.iter().map(|&d| d as f32).collect();
-            (ims.mz, ims.intensity, Some(mob))
-        }
-    };
+    let (mz, intensity) = (spectrum.mz, spectrum.intensity);
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
     let ms_level = ms_level_for_function(reader, function_index);
     let precursor = precursor_info_for(
@@ -554,7 +503,7 @@ pub fn record_from_scan(
         precursor,
         mz,
         intensity,
-        inv_mobility_per_peak: mobility,
+        inv_mobility_per_peak: None,
     }
 }
 
@@ -675,6 +624,7 @@ pub fn write_indexed_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reader::Encoding;
 
     // Regression test: every (name, accession) pair here was checked
     // directly against psi-ms.obo, not copied from the prior table (which
@@ -871,7 +821,7 @@ mod tests {
     fn source_skips_scans_that_fail_to_decode() {
         use crate::raw::index::{ScanIndex, ScanIndexB};
         use msc::SpectrumSource;
-        let mut reader = reader_with_functions(&[(Encoding::C, 0)]);
+        let mut reader = reader_with_functions(&[(Encoding::D, 0)]);
         // Offset past the end of a 0-byte DAT: scan_slice rejects it.
         reader.functions[0].scan_index = ScanIndex::B(vec![ScanIndexB {
             dat_offset: 100,
@@ -883,20 +833,14 @@ mod tests {
     }
 
     #[test]
-    fn mobility_array_kind_only_declared_when_ims_arrays_are_emitted() {
+    fn no_mobility_array_kind_is_declared() {
+        // Ion mobility is not decoded, so no run declares a mobility array
+        // kind, whatever its encodings or instrument.
         let kind = |functions: &[(Encoding, u8)]| {
             run_metadata_for(&reader_with_functions(functions)).mobility_array_kind
         };
-        // Non-IMS run: no drift-time arrays, so no mobility kind.
-        assert_eq!(kind(&[(Encoding::C, 0)]), None);
-        assert_eq!(kind(&[(Encoding::A, 0), (Encoding::D, 0)]), None);
-        // IMS function exported: drift time in milliseconds.
-        assert_eq!(
-            kind(&[(Encoding::B, 0), (Encoding::B, 0x80)]),
-            Some(msc::MobilityArrayKind::DriftTimeMilliseconds)
-        );
-        // IMS only on a lock-mass function, which iter_spectra skips.
-        assert_eq!(kind(&[(Encoding::C, 0), (Encoding::B, 0x80)]), None);
+        assert_eq!(kind(&[(Encoding::D, 0), (Encoding::D, 0x80)]), None);
+        assert_eq!(kind(&[(Encoding::A, 0), (Encoding::E, 0)]), None);
     }
 
     #[test]

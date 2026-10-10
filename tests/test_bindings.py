@@ -83,7 +83,7 @@ def test_ms_level_and_encoding(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
     for f in r.functions:
         assert r.ms_level(f.index) in (1, 2)
-        assert r.function_encoding(f.index) in ("a", "b", "c", "d", "e")
+        assert r.function_encoding(f.index) in ("a", "d", "e")
 
 
 def test_n_scans_and_retention_time(raw_bundle):
@@ -105,20 +105,10 @@ def test_read_spectrum(raw_bundle):
         assert "Spectrum(" in repr(spec)
 
 
-def test_read_ims_spectrum(raw_bundle):
-    r = openwraw.RawReader(str(raw_bundle))
-    saw_ims_function = False
-    for f in r.functions:
-        if r.function_encoding(f.index) != "b":
-            continue
-        saw_ims_function = True
-        ims = r.read_ims_spectrum(f.index, 0)
-        assert len(ims.mz) == len(ims.drift_time_ms) == len(ims.intensity)
-        assert len(ims) == len(ims.mz)
-        assert len(ims) > 0
-        assert "ImsSpectrum(" in repr(ims)
-    if not saw_ims_function:
-        pytest.skip("bundle has no Encoding B (IMS) function")
+def test_no_ion_mobility_api():
+    # Ion mobility is not decoded, so the bindings expose no drift-time API.
+    assert not hasattr(openwraw, "ImsSpectrum")
+    assert not hasattr(openwraw.RawReader, "read_ims_spectrum")
 
 
 def test_read_chrom(raw_bundle):
