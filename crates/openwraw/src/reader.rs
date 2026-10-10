@@ -199,30 +199,7 @@ impl Reader {
                     ),
                 },
                 ScanIndex::B(records) => {
-                    match sample_variant_b_width(&dat_path, records, dat_size)? {
-                        Some((12, scan)) => (
-                            Encoding::E,
-                            format!("30-byte index, 12-byte records judged from scan {scan}"),
-                        ),
-                        Some((_, scan)) => (
-                            Encoding::D,
-                            format!("30-byte index, 8-byte records judged from scan {scan}"),
-                        ),
-                        None => {
-                            log::warn!(
-                                "function {}: record width not established from sampled \
-                                 scans of {}; assuming 8-byte records",
-                                info.index,
-                                dat_path.display()
-                            );
-                            (
-                                Encoding::D,
-                                "30-byte index, record width not established from sampled \
-                                 scans; assuming 8-byte records"
-                                    .to_owned(),
-                            )
-                        }
-                    }
+                    variant_b_encoding(info.index, &dat_path, records, dat_size)
                 }
             };
             let cal = match header.cal_functions.get(&info.index) {
@@ -461,6 +438,56 @@ fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
 
 /// Scans sampled, evenly spaced, when judging a Variant B record width.
 const VARIANT_B_WIDTH_SAMPLES: usize = 16;
+
+/// Choose between Encodings D and E for a function with a 30-byte index by
+/// sampling scan slices from its DAT file. A failed read is logged and does
+/// not fail `Reader::open`; scans that cannot be read report their own errors
+/// when decoded.
+fn variant_b_encoding(
+    function: u32,
+    dat_path: &Path,
+    records: &[crate::raw::index::ScanIndexB],
+    dat_size: u64,
+) -> (Encoding, String) {
+    match sample_variant_b_width(dat_path, records, dat_size) {
+        Ok(Some((12, scan))) => (
+            Encoding::E,
+            format!("30-byte index, 12-byte records judged from scan {scan}"),
+        ),
+        Ok(Some((_, scan))) => (
+            Encoding::D,
+            format!("30-byte index, 8-byte records judged from scan {scan}"),
+        ),
+        Err(e) => {
+            // Each scan that cannot be read reports its own error when
+            // decoded; the other functions in the bundle stay readable.
+            log::warn!(
+                "function {}: could not sample scans of {}: {e}; \
+                 assuming 8-byte records",
+                function,
+                dat_path.display()
+            );
+            (
+                Encoding::D,
+                "30-byte index, sampling read failed; assuming 8-byte records".to_owned(),
+            )
+        }
+        Ok(None) => {
+            log::warn!(
+                "function {}: record width not established from sampled \
+                 scans of {}; assuming 8-byte records",
+                function,
+                dat_path.display()
+            );
+            (
+                Encoding::D,
+                "30-byte index, record width not established from sampled \
+                 scans; assuming 8-byte records"
+                    .to_owned(),
+            )
+        }
+    }
+}
 
 /// Judge the DAT record width of a 30-byte-index function from up to
 /// [`VARIANT_B_WIDTH_SAMPLES`] evenly spaced scans. Returns the width and the
@@ -900,5 +927,19 @@ mod tests {
         // File-controlled value: a mismatch is logged, never a panic, in
         // debug and release builds alike.
         check_peak_count_sanity(1, 0, 100, 5);
+    }
+
+    // A DAT file that passes the size check but cannot be read while sampling
+    // must not fail `Reader::open` for the whole bundle.
+    #[test]
+    fn variant_b_sampling_read_failure_assumes_encoding_d() {
+        let records = vec![ScanIndexB {
+            dat_offset: 0,
+            retention_time_min: 0.0,
+        }];
+        let missing = std::env::temp_dir().join("openwraw-test-missing/_FUNC001.DAT");
+        let (encoding, reason) = variant_b_encoding(1, &missing, &records, 64);
+        assert!(matches!(encoding, Encoding::D));
+        assert!(reason.contains("sampling read failed"), "{reason}");
     }
 }
