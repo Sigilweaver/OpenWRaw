@@ -58,9 +58,9 @@ nothing else to bump in lockstep.
    git push origin vX.Y.Z
    ```
 
-   Pushing the tag triggers `publish.yml`: `cargo publish` (best-effort,
-   `continue-on-error` so an already-published crate or a flaky registry
-   doesn't block the PyPI side), then wheel builds across all five
+   Pushing the tag triggers `publish.yml`: `cargo publish` (a failure
+   fails the run, so a crates.io problem is visible; the PyPI jobs do not
+   depend on it and still run), then wheel builds across all five
    OS/target legs plus an sdist build, then `pypi-publish` (`needs:
    [build-wheels, build-sdist]`).
 

@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The release workflow no longer ignores a failed `cargo publish`. A
+  crates.io failure now fails the run instead of passing silently; the
+  PyPI jobs do not depend on it.
 - **Breaking (Rust):** `ScanIndexB::dat_offset` is now `u64` (was `u32`).
   The Python `index_record` dictionary returns the full 64-bit value.
 
