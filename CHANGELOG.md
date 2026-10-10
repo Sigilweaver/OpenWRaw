@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cargo doc --no-deps` now builds cleanly from the workspace root: the
+  Python extension crate sets `doc = false` (its lib name collided with the
+  `openwraw` crate's docs), and two rustdoc links to private helpers were
+  replaced with plain code spans.
 - The release workflow no longer ignores a failed `cargo publish`. A
   crates.io failure now fails the run instead of passing silently; the
   PyPI jobs do not depend on it.
