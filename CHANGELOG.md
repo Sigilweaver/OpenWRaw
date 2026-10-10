@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject a scan whose `_FUNCnnn.IDX` offsets go backwards or point past the
   end of `_FUNCnnn.DAT` with an error instead of silently decoding a
   truncated or unrelated byte range.
+- A Variant A scan whose `_FUNCnnn.IDX` `peak_count` exceeds the decoded
+  peak count now logs a warning instead of panicking in debug builds. The
+  value comes from the file, so it is not an internal invariant.
 
 ### Changed
 

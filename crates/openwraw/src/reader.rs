@@ -45,11 +45,14 @@ fn check_peak_count_sanity(
     peak_count: u16,
     decoded_len: usize,
 ) {
-    debug_assert!(
-        peak_count as usize <= decoded_len,
-        "function {function_index} scan {scan_idx}: _FUNCnnn.IDX peak_count \
-         {peak_count} exceeds decoded peak count {decoded_len}"
-    );
+    // `peak_count` comes from the file, so a mismatch is a data problem to
+    // report, not an internal invariant to assert.
+    if peak_count as usize > decoded_len {
+        log::warn!(
+            "function {function_index} scan {scan_idx}: _FUNCnnn.IDX peak_count \
+             {peak_count} exceeds decoded peak count {decoded_len}"
+        );
+    }
 }
 
 /// Which decoder applies to a given function's `_FUNCnnn.DAT`.
@@ -843,8 +846,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds decoded peak count")]
-    fn peak_count_sanity_panics_when_peak_count_exceeds_decoded_len() {
+    fn peak_count_sanity_does_not_panic_when_peak_count_exceeds_decoded_len() {
+        // File-controlled value: a mismatch is logged, never a panic, in
+        // debug and release builds alike.
         check_peak_count_sanity(1, 0, 100, 5);
     }
 }
