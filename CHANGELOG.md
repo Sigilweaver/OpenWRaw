@@ -19,8 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated byte range.
 - A Variant A `peak_count` larger than the decoded peak count logs a
   warning instead of panicking in debug builds.
-- Run metadata declares a drift-time mobility array kind only when the run
-  exports drift-time arrays (a non-lock-mass SYNAPT IMS function).
+- Functions behind the 30-byte (Variant B) `_FUNCnnn.IDX` are decoded with
+  the floating-point m/z record model: Encoding D for 8-byte records,
+  Encoding E for 12-byte records. The former Encoding B (SYNAPT) and C
+  (Xevo) decoders read bytes 4-7 as two 16-bit bins and stretched each scan
+  between its first and last record, which put the lock-mass reference
+  134-645 ppm off, or lost it, in all 18 Variant B lock-mass functions of
+  the public corpus. It is now found with its 13C isotope in 17 (the other
+  holds no known lock compound): 14 within 76 ppm and 3 at 98-162 ppm,
+  with no lock-mass correction applied.
+- Spectra are labelled profile or centroid from their encoding instead of
+  centroid for every scan: Encodings A and D (profile points one sample
+  apart) are profile, Encoding E (one point per peak) is centroid.
+- The Python module defines `__version__`, which the install guide uses.
+- Drift times are no longer reported. The value reported as
+  `drift_time_ms` was the low 16 bits of the m/z word. Spectra carry no
+  mobility array and runs declare no mobility array kind.
+- The encoding of a 30-byte-index function no longer depends on the
+  instrument name; the DAT record width is judged from the m/z words of
+  sampled scans. This also reads the 12-byte lock-mass functions of some
+  Xevo G2-XS bundles, where no reference peak was found before.
 - `WatersSource` logs each scan that fails to decode, and the total, at
   warn level instead of skipping it silently. Unreadable `_CHROMS.INF`
   channels and `_CHROnnn.DAT` files are logged the same way.
@@ -29,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking (Rust):** `ScanIndexB::dat_offset` is `u64` (was `u32`). The
   Python `index_record` dictionary returns the full 64-bit value.
+- **Breaking (Rust):** `Encoding` is `#[non_exhaustive]` and has variants
+  `A`, `D` and `E`. `Reader`, `FunctionEntry`, `DecodedScan`, `Spectrum`
+  and `DecodeParams` are `#[non_exhaustive]`. `DecodedScan::spectrum` is a
+  `Spectrum`. `DecodeParams` holds only the calibration; build it with
+  `DecodeParams::new(cal)`.
+- **Breaking (Python):** `RawReader.function_encoding` returns `"a"`, `"d"`
+  or `"e"`.
 - Corpus tests read bundles from `OPENWRAW_CORPUS`
   (`<root>/<accession>/<bundle>.raw`). With `REQUIRE_CORPUS=1` a missing
   bundle fails the test; CI requires the conformance bundle on Linux and
@@ -36,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo doc --no-deps` builds cleanly from the workspace root.
 - A failed `cargo publish` fails the release run; the PyPI jobs do not
   depend on it.
+
+### Removed
+
+- **Breaking (Rust):** `Encoding::B`, `Encoding::C`, `decode_encoding_b`,
+  `decode_encoding_c`, `ImsSpectrum`, `DecodedSpectrum` and
+  `mzml::pool_ims`, and the `a_us`, `mz_low`, `mz_high` and `scan_time_ms`
+  fields of `DecodeParams`. They existed only for the Encoding B and C
+  decoders.
+- **Breaking (Python):** `ImsSpectrum` and `RawReader.read_ims_spectrum`.
+  Ion mobility is not decoded.
 
 ## [4.0.0] - 2026-10-04
 

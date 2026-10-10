@@ -51,8 +51,9 @@ decoder emits the former after removing sentinel and zero-intensity records;
 it does not centroid, so its output count and `peak_count` measure different
 things and an equality check would reject valid corpus scans.
 
-What does hold, and is what `Reader::decode_scan` checks (as a
-`debug_assert!`, `check_peak_count_sanity` in `reader.rs`): a centroid count
+What does hold, and is what `Reader::decode_scan` checks
+(`check_peak_count_sanity` in `reader.rs`, which logs a warning when it
+fails): a centroid count
 can never exceed the raw decoded record count, since every centroid is built
 from at least one raw point. `peak_count <= decoded_len` is therefore a cheap
 decode sanity check - it catches a decode that produced implausibly few
@@ -75,9 +76,13 @@ Key facts:
 - File size = N x 30 bytes (exact, no header)
 - DAT byte offset stored at +0x16 (NOT +0x00) - confirmed for all three datasets
 - Scan sizes vary depending on ion density
-- Total records check: sum(scan_sizes) / 8 = DAT_size / 8 exactly (flat 8-byte record array)
-- The Xevo G2-XS QTof (non-IMS) uses this variant despite having no drift dimension;
-  the IDX stride is 30 bytes and DAT records are 8 bytes (see `_FUNCnnn.DAT` Encoding C)
+- No record count: a scan runs from its offset to the next record's offset
+  (the last scan runs to the end of the DAT)
+- The index does not determine the DAT record layout. Behind this variant
+  the corpus holds 8-byte Encoding D records and, in some Xevo G2-XS
+  lock-mass functions, 12-byte Encoding E records; the width is judged from
+  the data (see `_FUNCnnn.DAT`, "Choosing the record width")
+- Both SYNAPT (mobility-capable) and Xevo QTof instruments use this variant
 
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
@@ -137,8 +142,8 @@ before per-scan intensity processing.
 
 - Check file_size mod 22 == 0 (Variant A) or mod 30 == 0 (Variant B)
 - Both should be mutually exclusive in practice
-- Variant B is used by both IMS (SYNAPT) and non-IMS (Xevo G2-XS) instruments
-- Presence of Apex3DIons.csv strongly implies IMS mode even if IDX is Variant B
+- Variant B is used by both SYNAPT and Xevo QTof instruments, and does not
+  by itself indicate an ion mobility acquisition
 
 ## Fields Under Investigation
 
@@ -153,8 +158,8 @@ before per-scan intensity processing.
 
 - Empirical hex analysis: `re/src/analysis/inspect.py records`
 - Corpus samples:
-  - PXD066594/WANG.raw (Variant B, SYNAPT G2-Si IMS, 590 scans)
-  - PXD068881/20220517_CtpA_1076_2h_1.raw (Variant B, SYNAPT G2-Si IMS, 1138 scans)
+  - PXD066594/WANG.raw (Variant B, SYNAPT G2-Si, 590 scans)
+  - PXD068881/20220517_CtpA_1076_2h_1.raw (Variant B, SYNAPT G2-Si, 1138 scans)
   - PXD058812/molecular_mass_P15_01.raw (Variant A, QTOF non-IMS, 197 scans)
   - PXD058812/MS_fragmentation_P29_01.raw (Variant A, QTOF non-IMS, 426 scans)
   - PXD075602/DHPR_11257-1.raw (Variant B, Xevo G2-XS QTof non-IMS, 1150 scans)

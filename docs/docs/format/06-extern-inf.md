@@ -38,9 +38,12 @@ There is no strict alignment requirement; fields are whitespace-separated
 with the field name (possibly multi-word, possibly containing parentheses
 and units) on the left and the value on the right.
 
-## Key Fields for m/z Decoding
+## Flight-Time Geometry Fields
 
-These fields are required to convert a stored TOF bin index to m/z.
+No `_FUNCnnn.DAT` encoding stores a TOF bin; every encoding stores m/z
+directly and only the `_HEADER.TXT` polynomial is applied. These fields
+describe the flight-time geometry. They are used to check the ADC sample
+spacing of Encoding D records (`t = A_us * sqrt(m/z)`), not to decode m/z.
 All are in the `Instrument Configuration:` section unless noted.
 
 | Field Name | Units | Description |
@@ -49,14 +52,7 @@ All are in the `Instrument Configuration:` section unless noted.
 | `Veff`  | V  | Effective accelerating voltage |
 | `PusherInterval` | µs | Actual pusher cycle period (authoritative value) |
 
-`PusherInterval` is the field used to convert a bin index to a raw flight
-time:
-
-```
-t_raw_us = tof_bin * (PusherInterval / 65536)
-```
-
-Several other field names encode the same physical quantity but appear in
+`PusherInterval` is the pusher cycle period. Several other field names encode the same physical quantity but appear in
 different instrument generations or contexts:
 
 | Also observed | Notes |
@@ -140,7 +136,7 @@ Key per-function fields:
 | `End Time (mins)` | min | Acquisition end retention time |
 | `Scan Time (sec)` | s | Duration of one scan |
 | `Interscan Time (sec)` | s | Dead time between scans |
-| `Data Format` | - | `Continuum` or `Centroid` |
+| `Data Format` | - | `Continuum` or `Centroid`. Not parsed. Every function in the corpus that declares it says `Continuum`, including lock-mass functions whose DAT holds centroids (see `_FUNCnnn.DAT`, "Profile or centroid") |
 | `Analyser` | - | `Resolution Mode` or `Sensitivity Mode` |
 | `ADC Sample Frequency (GHz)` | GHz | ADC sampling rate |
 | `ADC Pusher Frequency (µs)` | µs | Per-function pusher cycle override (if set) |
@@ -153,19 +149,11 @@ field `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
 functions (both targeted and MSe) comes from a separate file - see
 [07 - _FUNCnnn.STS](07-func-sts.md)'s "Collision Energy" channel.
 
-`Start Mass` / `End Mass` were previously decoded into
-`ExternFunction::start_mass_da` / `end_mass_da`, but the field was never read
-anywhere outside its own module's tests - spectrum decoding has always used
-`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high` exclusively, and the
-corpus never established whether the two pairs are aliases, bounds with
-different meanings, or which source should take precedence when they differ.
-The `_extern.inf` parser also never handled the `MSMS End Mass` key that
-`TOF MSMS FUNCTION` sections use instead of `End Mass` (see
-`crates/openwraw/src/raw/extern_inf.rs`'s `EXTERN_PXD035818_MSMS` test
-fixture), so `end_mass_da` silently stayed `0.0` for every targeted-MS/MS
-function - not a reliable value to promote to a decode cross-check. Given
-both the missing consumer and the parsing gap, the fields were removed
-rather than wired in (Sigilweaver/OpenWRaw#24).
+`Start Mass` / `End Mass` are not decoded. Spectrum decoding uses
+`_FUNCTNS.INF`'s `FunctionInfo::mz_low` / `mz_high`. The corpus has not
+established whether the two pairs are aliases or bounds with different
+meanings, and `TOF MSMS FUNCTION` sections use an `MSMS End Mass` key
+instead of `End Mass` (Sigilweaver/OpenWRaw#24).
 
 ## Version Line
 
@@ -197,4 +185,4 @@ in the corpus (Sigilweaver/OpenWRaw#13); Function 1's `Set Mass` reads
 ## Reference Sources
 
 - Corpus files: all `_extern.inf` files in PXD058812, PXD066594, PXD068881, PXD075602, PXD035818
-- Used by: `_HEADER.TXT` calibration polynomial, `_FUNCnnn.DAT` Encoding A/C m/z decode, `mzml::precursor_info_for` (`target_mz`)
+- Used by: `mzml::precursor_info_for` (`target_mz`). `ExternInf::a_us()` (flight-time constant from `Lteff`/`Veff`) is parsed but not used by any DAT decoder, since every encoding stores m/z directly

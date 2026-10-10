@@ -4,56 +4,48 @@ sidebar_position: 3
 
 # Quickstart
 
-## CLI
-
-```sh
-# Inspect a .raw directory
-openwraw inspect path/to/sample.raw
-
-# Convert all MS functions to mzML
-openwraw convert path/to/sample.raw -o output.mzML
-
-# Convert a single function
-openwraw convert path/to/sample.raw -o output.mzML --function 1
-```
-
 ## Rust
 
 ```rust
-use openwraw::raw::{
-    header::Header,
-    extern_inf::ExternInf,
-    functions_inf::FunctionTable,
-    index::ScanIndex,
-    data::{decode_encoding_a, DecodeParams},
-};
-use std::path::Path;
+use openwraw::Reader;
 
-let raw = Path::new("sample.raw");
-let header = Header::from_path(&raw.join("_HEADER.TXT"))?;
-let ext = ExternInf::from_path(&raw.join("_extern.inf"))?;
-let funcs = FunctionTable::from_path(&raw.join("_FUNCTNS.INF"))?;
+let reader = Reader::open("sample.raw")?;
+for function in &reader.functions {
+    println!(
+        "function {}: {} scans, encoding {:?}",
+        function.index,
+        function.scan_count(),
+        function.encoding
+    );
+}
 
-let f = &funcs.functions[0];
-let params = DecodeParams {
-    a_us: ext.a_us(),
-    cal: header.cal_functions[&f.index].clone(),
-    mz_low: f.mz_low as f64,
-    mz_high: f.mz_high as f64,
-    scan_time_ms: f.scan_time_s as f64 * 1000.0,
-};
-
-let idx_bytes = std::fs::read(raw.join(format!("_FUNC{:03}.IDX", f.index)))?;
-let dat_bytes = std::fs::read(raw.join(format!("_FUNC{:03}.DAT", f.index)))?;
-let ScanIndex::A(scans) = ScanIndex::from_bytes(&idx_bytes)? else { todo!() };
-
-for scan in &scans {
-    let start = scan.dat_offset as usize;
-    let end = start + scan.n_records as usize * 6;
-    let spectrum = decode_encoding_a(&dat_bytes[start..end], &params)?;
-    println!("RT={:.2}min  {} peaks", scan.retention_time_min, spectrum.mz.len());
+// Every non-lock-mass scan, in function then scan order.
+for scan in reader.iter_spectra() {
+    let scan = scan?;
+    println!(
+        "function {} scan {}: RT={:.2} min, {} points",
+        scan.function_index,
+        scan.scan_idx,
+        scan.retention_time_min,
+        scan.spectrum.mz.len()
+    );
 }
 ```
+
+m/z is calibrated with the polynomial in `_HEADER.TXT`; no lock-mass
+correction is applied. Ion mobility is not decoded.
+
+## mzML (Rust)
+
+OpenWRaw is a library and ships no command-line tool. To convert a bundle
+to indexed mzML from Rust:
+
+```rust
+let mut out = std::io::BufWriter::new(std::fs::File::create("output.mzML")?);
+openwraw::mzml::write_indexed_mzml("sample.raw", &mut out)?;
+```
+
+Lock-mass functions are not written, and spectra carry no mobility arrays.
 
 ## Python
 
@@ -63,13 +55,9 @@ import openwraw
 r = openwraw.RawReader("sample.raw")
 print(r.functions)         # list of FunctionInfo
 
-# 1-D spectrum (Encoding A or C)
+# Calibrated m/z and intensity for function 1, scan 0
 spec = r.read_spectrum(1, 0)
 print(spec.mz[:5], spec.intensity[:5])
-
-# Full IMS spectrum (Encoding B, SYNAPT)
-ims = r.read_ims_spectrum(1, 0)
-print(ims.mz[:3], ims.drift_time_ms[:3])
 
 # Chromatographic channels
 for ch in r.channels:
@@ -80,6 +68,6 @@ for ch in r.channels:
 ## Next
 
 - [Reader API](./guide/reader)
-- [Encodings A / B / C](./guide/encodings)
+- [Encodings](./guide/encodings)
 - [Ion mobility](./guide/ims)
 - [Format specification](./format/overview)

@@ -2,7 +2,31 @@
 
 Binary spectrum data file. One file per function.
 Contains all spectra for that function, stored contiguously.
-Several record formats are observed depending on index variant and acquisition software.
+Three record layouts (encodings) are known. The encoding is a property of the
+DAT records, not of the index: Encodings D and E appear behind both the
+22-byte (Variant A) and the 30-byte (Variant B) index.
+
+| Encoding | Record size | Index variants | Layout |
+|----------|-------------|----------------|--------|
+| A | 6 bytes  | A    | u16 ion count, floating-point m/z (4-bit exponent, 24-bit mantissa) |
+| D | 8 bytes  | A, B | 16.16 intensity, floating-point m/z (5-bit exponent, 27-bit mantissa) |
+| E | 12 bytes | A, B | compressed intensity, Encoding D m/z word, auxiliary word |
+
+Every encoding stores an uncalibrated m/z per record; the `_HEADER.TXT`
+T1 polynomial applies to sqrt(m/z). No lock-mass correction is applied by
+the reader.
+
+## Choosing the record width
+
+- Variant A index: consecutive DAT offsets divided by the record count give
+  6, 8 or 12 bytes per record.
+- Variant B index: the record has no record count. The width is judged from
+  the data. Under the right width every record's bytes 4-7 are a position
+  word with bit 26 set, and m/z never decreases within a scan. Up to 16
+  evenly spaced scans are sampled and the first one that fits exactly one of
+  8 or 12 bytes (with at least three records) decides. When none decides, the
+  reader logs a warning and assumes 8 bytes; a wrong guess then fails at
+  decode time with an error rather than producing data.
 
 ## Encoding A: 6-byte records (Variant A index)
 
@@ -37,11 +61,6 @@ acquisition range in `_FUNCTNS.INF`: in PXD058812 `70 CA FF C7` is
 `0xF9FF4A * 2^-13 = 1999.98` for a 100-2000 function. The decoder rejects
 records whose low nibble is non-zero or whose mantissa is not normalized.
 
-Earlier versions read byte 2 as a "block type", byte 3 as an 8-bit intensity
-and bytes 4-5 as a TOF bin anchored to `mz_high`. That reading put peaks
-outside the acquisition range (for example 820-3312 in a 100-2000 function)
-and is superseded.
-
 ### Validation (clean-room)
 
 - Every record in six bundles has a zero low nibble and a normalized
@@ -57,23 +76,28 @@ and is superseded.
   attributed to that instrument's calibration at acquisition time; this has
   not been proven.
 
-## Encoding D: 8-byte records behind a Variant A index
+## Encoding D: 8-byte records (either index variant)
 
-### Status: Decoded; m/z checked against physics and lock-mass references (2026-09-26)
+### Status: Decoded; m/z checked against physics and lock-mass references
 
-Observed in: PXD081045 (Vion IMS QTof, UNIFI 2.0 export), PXD001123 and
-PXD009047 (SYNAPT G2, MassLynx 4.1), PXD037102
+Observed behind the 22-byte index in: PXD081045 (Vion IMS QTof, UNIFI 2.0
+export), PXD001123 and PXD009047 (SYNAPT G2, MassLynx 4.1), PXD037102.
+
+Observed behind the 30-byte index in: PXD001175, PXD001471, PXD002393,
+PXD005960, PXD035818 (SYNAPT G2-S); PXD066594, PXD068881, PXD079562,
+PXD080129 (SYNAPT G2-Si); PXD071342, PXD073126 (SYNAPT XS); PXD045625,
+PXD053170, PXD075602, PXD078353 (Xevo G2-XS, all non-lock functions and
+some lock functions); PXD069628 (Xevo G3).
 
 Key facts:
-- 22-byte IDX Variant A index; consecutive offsets divided by record counts
-  give an 8-byte record width
 - No sentinel records; the first and last records are ordinary profile points
+- Zero-intensity records are skipped by the decoder
 
 ### 8-byte Record Layout
 
 | Bytes | Type    | Description |
 |-------|---------|-------------|
-| 0-3   | u32 LE  | Intensity, unsigned 16.16 fixed point (bytes 0-1 are dyadic fractions such as 1/2, 1/4, 3/4) |
+| 0-3   | u32 LE  | Intensity, unsigned 16.16 fixed point (bytes 0-1 are the fraction) |
 | 4-7   | u32 LE  | m/z word: 5-bit exponent `E` (bits 27-31), 27-bit mantissa `F` with bit 26 always set |
 
 ```
@@ -81,7 +105,11 @@ mz_uncal = F * 2^(E - 27)          # F in [2^26, 2^27)
 mz       = (T1(sqrt(mz_uncal)))^2
 ```
 
+A position word without bit 26 set is a decode error.
+
 ### Validation (clean-room)
+
+22-byte index:
 
 - Profile points are spaced by exactly one ADC sample. With flight time
   `t = A_us * sqrt(m/z)` from `Lteff`/`Veff` and the `ADC Sample Frequency`
@@ -97,17 +125,49 @@ mz       = (T1(sqrt(mz_uncal)))^2
   monoisotopic peak saturates and centroids 10-20 ppm higher than its
   isotopes. Without T1 the same peaks are 130-146 ppm low.
 
-The Vion files were previously decoded by the Encoding C first/last-record
-anchor, which stretched each scan onto the declared mass range and put
-Leu-Enk anywhere from -1447 to +3378 ppm.
+30-byte index:
 
-## Encoding E: 12-byte records behind a Variant A index
+- In 20 evenly spaced scans of every 8-byte function in the 18 bundles
+  above, every record's bytes 4-7 have bit 26 set and m/z never decreases
+  within a scan.
+- Bytes 0-1 are non-zero in a minority of records (about 1-55% per
+  function), with values such as `0xFF00` and `0xE000`, consistent with the
+  fraction of a 16.16 intensity.
+- Lock mass, median over 20 lock-mass scans, after T1, counting only scans
+  where the reference peak's 13C isotope sits one isotope spacing higher
+  (`examples/audit_corpus.rs`):
+
+| Bundle | Instrument | Reference | ppm |
+|--------|------------|-----------|-----|
+| PXD001471 57 | SYNAPT G2-S | Glu-fib 2+ | -17.3 |
+| PXD002393 S130426_21 | SYNAPT G2-S | Glu-fib 2+ | -75.6 |
+| PXD001175 S121126_06 | SYNAPT G2-S | Glu-fib 2+ | +161.7 |
+| PXD068881 CtpA_1076_2h_1 | SYNAPT G2-Si | Leu-Enk | -29.6 |
+| PXD080129 186/203/205_nr15 | SYNAPT G2-Si | Leu-Enk | +20.3 each |
+| PXD071342 MDE_WT2_DIA | SYNAPT XS | Leu-Enk | +55.0 |
+| PXD073126 KMI_sFtsk_2 | SYNAPT XS | Glu-fib 2+ | +37.4 |
+| PXD075602 DHPR_11257-1 | Xevo G2-XS | Leu-Enk | +66.5 |
+| PXD078353 (two runs) | Xevo G2-XS | Leu-Enk | +48.7, +42.2 |
+| PXD069628 HC18_CE, HC20_CE | Xevo G3 | Leu-Enk | -97.6, -107.9 |
+
+  The PXD005960 lock function holds one scan whose dominant ion (m/z 825.1)
+  is not a known lock compound. The larger offsets (PXD001175, PXD069628)
+  are uniform across the reference peak and its isotope, which points to
+  instrument calibration at acquisition time rather than the record model;
+  this has not been proven.
+
+## Encoding E: 12-byte records (either index variant)
 
 Original public LCT Premier acquisitions in [MTBLS701](https://www.ebi.ac.uk/metabolights/MTBLS701)
 and [MTBLS13770](https://www.ebi.ac.uk/metabolights/MTBLS13770) pair the
 22-byte index with 12-byte mass records. Consecutive index offsets divided
 by the preceding 24-bit record count establish the width. A separate optical
 function in MTBLS701 uses the existing 6-byte encoding and is unchanged.
+
+The lock-mass functions of public Xevo G2-XS bundles PXD045625
+(Abu_190520_Sha11, function 3) and PXD053170 (both runs, function 2) pair
+the 30-byte index with the same 12-byte layout; their other functions use
+Encoding D.
 
 | Offset | Size | Interpretation |
 | --- | --- | --- |
@@ -123,13 +183,13 @@ exponent = (u >> 22) & 0x1f
 intensity = mantissa * 2^(exponent - 21)
 ```
 
-Every nonzero intensity in the six mass functions inspected has bit 20 set
-and bit 21 clear. Higher bits are flags rather than exponent bits; their
+Every nonzero intensity in the six LCT mass functions inspected has bit 20
+set and bit 21 clear. Higher bits are flags rather than exponent bits; their
 meaning is unresolved. The decoder keeps flagged peaks and ignores the
 auxiliary word. It rejects unsupported nonzero mantissa patterns. The T1
 header calibration applies to sqrt(m/z), as for Encoding D.
 
-Across all 24,484,578 mass records in the two selected acquisitions, raw
+Across all 24,484,578 mass records in the two selected LCT acquisitions, raw
 positions are ordered within every scan and have the normalized Encoding D
 position pattern. Intensity sums excluding bit-28-marked points agree with
 the same-file index TIC within 113 ppm. This is a byte-derived consistency
@@ -138,189 +198,54 @@ accuracy. No vendor software or vendor-derived expected output was used.
 The exact 213-byte `_CHROMS.INF` variant in issue #36 was not present and
 remains unresolved.
 
+On the Xevo G2-XS lock-mass functions, every sampled scan decodes without an
+intensity-word error and leucine enkephalin lands at +11.0 (PXD045625),
++9.5 and +10.4 ppm (PXD053170) with its 13C isotope one spacing higher. The
+intensity scale on these functions has not been checked against a TIC.
+
 This support covers the twelve-byte mass functions. The separate MTBLS701
 optical function still uses Encoding A and fails its existing m/z decoder on
 some scans. Canonical MTBLS13770 function 2 records also retain the existing
 MS2-without-precursor metadata behavior, which does not pass the shared core
 conformance check. Neither limitation is corrected by Encoding E.
 
-## Encoding B: 8-byte records (IMS mode - SYNAPT G2-Si)
+## Profile or centroid
 
-### Status: Decoded and Validated (Phase 4)
+Spectra are labelled per encoding, from the spacing of the stored points:
 
-Observed in: PXD066594 (WANG.raw), PXD068881 (CtpA) - both SYNAPT G2-Si
+| Encoding | Label | Evidence |
+|----------|-------|----------|
+| A | profile | Peaks are runs of consecutive points one sample apart, for example PXD058812 `molecular_mass_P15_01.raw` scan 98: about 90 points at 0.009 Da steps from 600.68 to 601.47 tracing two isotope peaks |
+| D | profile | Consecutive points are one ADC sample apart (see the Encoding D validation); in 30-byte-index functions 51-99% of consecutive steps are a single sample, and a lock-mass peak spans several points (PXD068881: 556.244, 556.254, 556.264, 556.275, 556.285) |
+| E behind the 30-byte index | centroid | One point per peak at irregular spacing: in PXD053170 `20231113_NSE_Sample_High.raw` function 2, leucine enkephalin and its isotopes are single points at 556.159, 557.162 and 558.163 (uncalibrated), with neighbours 0.03-0.1 Da away; only 21-26% of steps are a single sample |
+| E behind the 22-byte index (LCT Premier) | centroid | Same record layout as above. The point spacing of these functions has not been checked; the LCT bundles are not in the public corpus used here |
 
-Key facts:
-- File is a flat array of 8-byte records with NO embedded scan headers
-- Scan boundaries are given by IDX Variant B offsets (u32@0x16)
-- Total: sum(scan record counts) x 8 = file size exactly (confirmed)
-- Scan sizes vary (min 636,928 / max 784,640 bytes for WANG.raw) = variable ion detections
-- Each 8-byte record represents one (IMS drift bin, TOF bin) cell with an ion count
-- Each survey scan is a complete 2D IMS-TOF image: every occupied (dt_bin, tof_bin) cell is stored
+`_extern.inf` `Data Format` reads `Continuum` for every function that declares
+it, including the Encoding E lock-mass functions above, so it is not used.
+The `_FUNCTNS.INF` +0x000 word is consistent with the encoding (bits 10-14 are
+9 for Encoding A, 12 for D behind the 22-byte index, 28 for D behind the
+30-byte index and 29 for E behind the 30-byte index; bit 15 marks lock mass),
+but no single bit separates profile from centroid, so it is not used either.
 
-### 8-byte Record Layout (IMS mode)
+## Ion mobility (SYNAPT HDMS): not decoded
 
-| Bytes | Type   | Confirmed | Description |
-|-------|--------|-----------|-------------|
-| 0     | u8     | Yes       | Always 0x00 in tested datasets |
-| 1     | u8     | Yes       | Always 0x00 (padding) |
-| 2-3   | u16 LE | **Yes**   | Ion count (TDC count per cell; 0-~800 typical) |
-| 4-5   | u16 LE | **Yes**   | dt_bin: IMS drift time bin (see below) |
-| 6-7   | u16 LE | **Yes**   | tof_bin: TOF time bin (same role as Encoding C bytes[6-7]) |
+The reader does not decode ion mobility. Scans from SYNAPT functions are
+returned as m/z and intensity only, mzML output carries no mobility array,
+and no run declares a mobility array kind.
 
-Sort key = `(tof_bin << 16) | dt_bin`, ascending. Records are sorted primarily by tof_bin
-(= m/z) then by dt_bin (= IMS drift position) within each tof_bin group.
-
-Note: in previous analysis, bytes[1:4] were incorrectly treated as a u24 intensity.
-The correct layout has intensity as u16 at bytes[2:4], with bytes[0:2] always zero.
-
-### IMS Drift Time Encoding
-
-The dt_bin (bytes[4:6]) encodes IMS drift time linearly within the scan window:
-
-```
-drift_time_ms = dt_bin * scan_time_ms / 65536
-```
-
-where scan_time_ms = scan_time in ms from _FUNCTNS.INF +0x020 (× 1000).
-
-The IMS grid is sparse relative to the push count: instruments use N_IMS equally-spaced
-drift bins covering the full scan duration.
-
-| Dataset | scan_time | dt_bin step | N_IMS bins | IMS bin width |
-|---------|-----------|-------------|------------|---------------|
-| WANG    | 1000 ms   | 912         | 71         | 13.9 ms       |
-| CtpA    | 300 ms    | ~4928       | 13         | 22.6 ms       |
-
-The dt_bin value for each cell is FIXED across all scans (does not change with RT).
-Only the ion count at that cell varies scan-to-scan.
-
-Cross-validated: WANG _PROC003.DAT dt_bin field uses the same 1712-unit spacing
-as the raw _FUNC001.DAT dt_bin field, confirming they are the same IMS coordinate.
-
-### Sentinel Records
-
-- CtpA: has TWO zero-count sentinel records (first and last in scan, same as Encoding C).
-  First sentinel tof_bin = tof_bin_low (mz_low anchor); last sentinel = tof_bin_high.
-- WANG: NO zero-count sentinels. First record tof_bin = tof_bin_low directly (no zero record).
-
-For m/z decoding, tof_bin_low and tof_bin_high can always be derived from the first and last
-records of any scan (sentinel or first real hit).
-
-### TOF m/z Decoding (Encoding B)
-
-Uses the tof_bin field (bytes[6:8]) only; dt_bin is NOT used for m/z.
-Formula identical to Encoding C except sub_bin = 0 (integer tof_bin only, no sub-bin):
-
-```
-A_us         = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6   [µs/sqrt(Da)]
-
-# From first/last records of scan:
-tof_bin_low  = tof_bin of first record in scan                    [integer]
-tof_bin_high = tof_bin of last record in scan                     [integer]
-t_low        = A_us * sqrt(mz_low)                                [µs]
-t_high       = A_us * sqrt(mz_high)                               [µs]
-t_bin        = (t_high - t_low) / (tof_bin_high - tof_bin_low)   [µs/bin]
-
-# For each data record:
-t_raw_us     = t_low + (tof_bin - tof_bin_low) * t_bin            [µs]
-t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                   [T1 polynomial]
-mz           = (t_cal_us / A_us)^2                                 [Da]
-```
-
-Note: m/z precision is limited to integer tof_bin (no sub-bin fractional correction).
-At 4.6-5.6 ns/bin, resolution at mz=500 Da is ~0.10 Da per bin.
-
-Validated: CtpA scan 228 (RT=2.4268 min).
-Expected m/z=122.08 (from Apex3DIons.csv accession), decoded mz_raw≈121.67-122.03 from
-records at tof_bin=16191-16195 using the sentinel-derived t_bin=4.62 ns. After
-calibration polynomial the decoded m/z converges to the Apex3D-reported value.
-
-## Encoding C: 8-byte records (non-IMS QTof mode - Xevo G2-XS)
-
-### Status: Decoded and Validated (Phase 3)
-
-Observed in: PXD075602 (DHPR_11257-1.raw, Xevo G2-XS QTof)
-
-Key facts:
-- Same 30-byte IDX Variant B as IMS datasets; DAT offsets at IDX+0x16
-- Same 8-byte record size as Encoding B, but structurally different internal layout
-- Scan sizes range from 5,776 to 1,019,888 bytes (722-127,486 records per scan)
-- Records are sorted ascending by compound coordinate (bytes 4-7)
-- Bytes[0-1] are **always 0x0000** (no flags, no drift time - non-IMS instrument)
-- Every scan has a fixed FIRST record (zero intensity, encodes mz_low bound)
-  and a fixed LAST record (zero intensity, encodes mz_high bound)
-
-### 8-byte Record Layout (non-IMS QTof mode)
-
-| Bytes | Type   | Confirmed | Description |
-|-------|--------|-----------|-------------|
-| 0-1   | u16 LE | Yes       | Always 0 (no drift-time axis for non-IMS instruments) |
-| 2-3   | u16 LE | Yes       | Intensity (16-bit unsigned; 0-~500 range typical) |
-| 4-5   | u16 LE | Yes       | Sub-bin: fine TDC position within the coarse TOF bin (fractional offset, 0-65535) |
-| 6-7   | u16 LE | Yes       | tof_bin: coarse TOF time-bin index |
-
-The sort key compound u32 = `(tof_bin << 16) | sub_bin` (ascending). Records are sorted
-primarily by tof_bin (coarse position), then sub_bin (fine position) within each tof_bin.
-
-### Sentinel Records
-
-- **First record** (always zero intensity): tof_bin = mz_low_bin, encodes start of the
-  active detection window. Constant across all scans of the same function.
-  Example (DHPR Fn1): tof_bin=13887 → corresponds to mz_low=50 Da.
-
-- **Last record** (always zero intensity): tof_bin = mz_high_bin, encodes end of the
-  active detection window. Constant across all scans.
-  Example (DHPR Fn1): tof_bin=23727 → corresponds to mz_high=1200 Da.
-
-The sentinel pair provides the linear calibration anchor for converting tof_bin to flight time.
-
-### TOF m/z Decoding (Encoding C)
-
-Calibration constants: `_HEADER.TXT` (Cal Function N polynomial), `_extern.inf` (Lteff, Veff),
-`_FUNCTNS.INF` (mz_low at +0x0A0, mz_high at +0x120).
-
-```
-A_us         = (Lteff_mm / 1000) / sqrt(2 * e_per_Da * Veff) * 1e6   [µs/sqrt(Da)]
-
-# From sentinel records:
-mz_low_bin   = tof_bin of first record in scan                        [integer]
-mz_high_bin  = tof_bin of last record in scan                         [integer]
-t_low        = A_us * sqrt(mz_low)                                    [µs]
-t_high       = A_us * sqrt(mz_high)                                   [µs]
-t_bin        = (t_high - t_low) / (mz_high_bin - mz_low_bin)         [µs/bin]
-
-# For each data record:
-frac_bin     = tof_bin - mz_low_bin + sub_bin / 65536                 [bins, fractional]
-t_raw_us     = t_low + frac_bin * t_bin                               [µs]
-t_cal_us     = c0 + c1*t_raw + c2*t_raw^2 + ...                      [T1 polynomial]
-mz           = (t_cal_us / A_us)^2                                    [Da]
-```
-
-Validated: DHPR_11257-1.raw scan 575 (RT=10.022 min).
-Top peaks at m/z ≈ 591, 608, 809, 822, 881 Da - consistent with LC-MS tryptic peptides
-at mid-gradient in a 20-minute LC run.
-
-### Distinguishing Encoding B from C
-
-Both encodings use 8-byte records and IDX Variant B (30-byte stride).
-The presence of IMS data can be confirmed by:
-- `Apex3DIons.csv` in the `.raw` folder (IMS only, if Apex3D processing was run)
-- `_FUNCTNS.INF` scan_subtype byte +0x01: 0x71 = IMS survey, 0xF1 = IMS lock-mass
-- Record structure: Encoding B bytes[0:2] = 0x0000 always; Encoding C also always 0x0000.
-  Distinguishing B from C requires checking whether bytes[4:6] (lo) covers the full 0-65535
-  range uniformly (B = IMS bins, typically 13-71 fixed positions) vs varying per record (C = sub_bin).
-
-In practice, IMS datasets always have `_PROC*.DAT/IDX/STS` files or Apex3D output files.
+Known facts:
+- SYNAPT functions behind the 30-byte index use Encoding D records. Within
+  every sampled scan m/z never decreases, so a stored scan is not split into
+  drift-ordered blocks.
+- Where drift time is recorded is unresolved. Candidates include the index
+  records, the `_PROCnnn` files and per-bundle side files such as
+  `mob_cal.csv` (shipped in the PXD080129 bundles).
 
 ## Fields Under Investigation
 
 - Encoding A: meaning of the byte 2 low nibble (always zero in the corpus)
-- Encodings B and C: bytes 4-7 pass the same floating-point m/z and ADC-sample
-  checks as Encoding D in every 30-byte-index function sampled, and bytes 0-1
-  look like fractional intensity rather than a drift axis. The first/last
-  record anchor used by the current B and C decoders fails lock-mass checks.
-- Encoding B: whether byte[0] ever takes non-zero values and what they encode
+- Encoding E: intensity flag bits and the auxiliary word
+- Ion mobility: where drift time is stored for SYNAPT acquisitions
 
 ## Reference Sources
 
@@ -329,6 +254,8 @@ In practice, IMS datasets always have `_PROC*.DAT/IDX/STS` files or Apex3D outpu
 - Corpus samples:
   - PXD058812/molecular_mass_P15_01.raw (Encoding A, 197 scans, ~1050 rec/scan)
   - PXD058812/MS_fragmentation_P29_01.raw (Encoding A, 426 scans)
-  - PXD066594/WANG.raw (Encoding B, 590 scans, 79616-98080 rec/scan)
-  - PXD068881/20220517_CtpA_1076_2h_1.raw (Encoding B, 1138 scans)
-  - PXD075602/DHPR_11257-1.raw (Encoding C, 1150 scans, 722-127486 rec/scan)
+  - PXD066594/WANG.raw (30-byte index, Encoding D, 590 scans)
+  - PXD068881/20220517_CtpA_1076_2h_1.raw (30-byte index, Encoding D, 1138 scans)
+  - PXD075602/DHPR_11257-1.raw (30-byte index, Encoding D, 1150 scans)
+  - PXD053170/20231113_NSE_Sample_High.raw (30-byte index; Encoding D survey,
+    Encoding E lock mass)

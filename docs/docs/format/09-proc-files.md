@@ -1,5 +1,14 @@
 # _PROCnnn.DAT / _PROCnnn.IDX / _PROCnnn.STS / _PROCnnn.MAX
 
+:::note
+
+OpenWRaw does not read these files and decodes no drift time from them. The
+layout notes below, including any `dt_bin` / `tof_bin` split of a record
+word, are unverified working notes. The same split was shown not to hold for
+`_FUNCnnn.DAT` (see `_FUNCnnn.DAT`).
+
+:::
+
 Post-processed spectrum data created by MassLynx peak-processing step.
 Found only in SYNAPT G2-Si IMS acquisitions in the corpus; not present in
 non-IMS or native-MS-only datasets.
