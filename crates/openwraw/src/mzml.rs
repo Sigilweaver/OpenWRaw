@@ -718,23 +718,17 @@ mod tests {
         }
     }
 
-    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
-    /// out as a sibling of this repo; skip silently when it's absent.
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../SpecLance/corpus/waters")
-    }
-
     // Sigilweaver/OpenWRaw#8 / #13: targeted MS/MS ("TOF MSMS FUNCTION", Set
     // Mass = 884.9) must populate `precursor.target_mz`, unlike the
     // broadband MSe/HDMSe corpus this crate previously had exclusive access
     // to, which has no discrete precursor at all.
     #[test]
     fn corpus_pxd035818_targeted_msms_populates_precursor_target_mz() {
-        let dir = corpus_dir().join("PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw");
-        if !dir.exists() {
+        let Some(dir) =
+            crate::test_corpus::bundle(&["PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw"])
+        else {
             return;
-        }
+        };
         let reader = Reader::open(&dir).unwrap();
         let records = collect_records(&reader).unwrap();
         assert!(!records.is_empty());
@@ -760,10 +754,9 @@ mod tests {
     // though collision_energy is available from `_FUNCnnn.STS`.
     #[test]
     fn corpus_pxd075602_hdmse_has_collision_energy_but_no_target_mz() {
-        let dir = corpus_dir().join("PXD075602/DHPR_11257-1.raw");
-        if !dir.exists() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
         let reader = Reader::open(&dir).unwrap();
         let records = collect_records(&reader).unwrap();
         let ms2: Vec<_> = records.iter().filter(|r| r.ms_level == 2).collect();

@@ -21,6 +21,10 @@ For any PR:
 - Run `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings`
   locally. CI will run them too.
 - Run `cargo test --all` (and `pytest` if the change touches Python).
+  Corpus tests read public bundles from the directory named by
+  `OPENWRAW_CORPUS` (laid out as `<root>/<PXD accession>/<bundle>.raw`) and
+  skip when a bundle is missing. Set `REQUIRE_CORPUS=1` to make a missing
+  bundle fail the test instead.
 - Update [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` with a
   short bullet describing the user-visible change.
 - Prefer [Conventional Commits](https://www.conventionalcommits.org/)

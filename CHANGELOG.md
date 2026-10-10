@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Corpus-gated tests now find bundles under one root set by
+  `OPENWRAW_CORPUS` (`<root>/<accession>/<bundle>.raw`) instead of
+  hard-coded `/workspaces/OpenWRaw/corpus` and sibling `SpecLance` paths.
+  With `REQUIRE_CORPUS=1`, a missing bundle fails the test instead of
+  passing silently. CI requires the conformance bundle on Linux and macOS.
 - `cargo doc --no-deps` now builds cleanly from the workspace root: the
   Python extension crate sets `doc = false` (its lib name collided with the
   `openwraw` crate's docs), and two rustdoc links to private helpers were

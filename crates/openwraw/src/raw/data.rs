@@ -647,17 +647,16 @@ mod tests {
     }
 
     // -- Corpus integration tests --
-    // These tests read from the local corpus and are skipped when it is absent.
+    // These tests read bundles under OPENWRAW_CORPUS and skip when absent
+    // (fail instead with REQUIRE_CORPUS=1); see crate::test_corpus.
 
     #[test]
     fn corpus_encoding_a_pxd058812() {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
-        use std::path::Path;
 
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD058812/molecular_mass_P15_01.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD058812/molecular_mass_P15_01.raw"]) else {
             return;
-        }
+        };
 
         let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
         let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
@@ -699,12 +698,11 @@ mod tests {
     #[test]
     fn corpus_encoding_b_pxd068881() {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
-        use std::path::Path;
 
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
+        else {
             return;
-        }
+        };
 
         let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
         let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
@@ -760,12 +758,10 @@ mod tests {
     #[test]
     fn corpus_encoding_c_pxd075602() {
         use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
-        use std::path::Path;
 
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD075602/DHPR_11257-1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
 
         let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
         let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
