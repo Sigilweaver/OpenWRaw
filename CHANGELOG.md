@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Variant B `_FUNCnnn.IDX` DAT offsets are read as 64 bits (low word at
+  +0x16, high word at +0x1A). Scans past 4 GiB in a `_FUNCnnn.DAT` decoded
+  bytes from the start of the file, and the scan before them came back
+  empty. Affected 2,708 scans in three public functions (PXD045625,
+  PXD071342).
+- A scan whose `_FUNCnnn.IDX` offsets go backwards or past the end of
+  `_FUNCnnn.DAT` returns an error instead of decoding a truncated or
+  unrelated byte range.
+- A Variant A `peak_count` larger than the decoded peak count logs a
+  warning instead of panicking in debug builds.
+- Run metadata declares a drift-time mobility array kind only when the run
+  exports drift-time arrays (a non-lock-mass SYNAPT IMS function).
+- `WatersSource` logs each scan that fails to decode, and the total, at
+  warn level instead of skipping it silently. Unreadable `_CHROMS.INF`
+  channels and `_CHROnnn.DAT` files are logged the same way.
+
+### Changed
+
+- **Breaking (Rust):** `ScanIndexB::dat_offset` is `u64` (was `u32`). The
+  Python `index_record` dictionary returns the full 64-bit value.
+- Corpus tests read bundles from `OPENWRAW_CORPUS`
+  (`<root>/<accession>/<bundle>.raw`). With `REQUIRE_CORPUS=1` a missing
+  bundle fails the test; CI requires the conformance bundle on Linux and
+  macOS.
+- `cargo doc --no-deps` builds cleanly from the workspace root.
+- A failed `cargo publish` fails the release run; the PyPI jobs do not
+  depend on it.
+
 ## [4.0.0] - 2026-10-04
 
 ### Fixed

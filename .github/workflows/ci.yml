@@ -49,15 +49,31 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Corpus-gated tests read bundles under OPENWRAW_CORPUS as
+      # <root>/<accession>/<bundle>.raw (see crates/openwraw/src/test_corpus.rs).
       - name: Download and unzip Waters sample
         if: runner.os != 'Windows'
         run: |
           wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
-          unzip -q waters.raw.zip
-          test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
+          mkdir -p corpus/PXD058812
+          unzip -q waters.raw.zip -d corpus/PXD058812
+          test -d "corpus/PXD058812/$WATERS_BUNDLE" || (echo "expected bundle dir corpus/PXD058812/$WATERS_BUNDLE missing" && exit 1)
 
+      # Only the conformance bundle is fetched, so the other corpus tests
+      # skip here; REQUIRE_CORPUS is not set for this step.
       - name: cargo test
+        env:
+          OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
         run: cargo test --workspace
+
+      # This job fetched the conformance bundle, so a missing bundle must
+      # fail instead of skipping.
+      - name: cargo test (conformance, corpus required)
+        if: runner.os != 'Windows'
+        env:
+          OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
+          REQUIRE_CORPUS: "1"
+        run: cargo test -p openwraw --test conformance
 
   python:
     name: python (${{ matrix.os }})

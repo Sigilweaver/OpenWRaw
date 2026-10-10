@@ -431,11 +431,10 @@ mod tests {
 
     #[test]
     fn corpus_ctpa_chroms_inf() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
+        else {
             return;
-        }
+        };
         // PXD068881: 7 channel records, file = 723 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         assert_eq!(ci.channels.len(), 7, "CtpA should have 7 channels");
@@ -457,11 +456,10 @@ mod tests {
 
     #[test]
     fn corpus_ctpa_chro_dat() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
+        else {
             return;
-        }
+        };
         // _CHRO001.DAT = first channel (BSM System Pressure, channel index 0)
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         let chro_num = ci.chro_number_for_channel(0); // = 1
@@ -478,11 +476,9 @@ mod tests {
 
     #[test]
     fn corpus_dhpr_chroms_inf() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD075602/DHPR_11257-1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
         // PXD075602: 5 channel records, file = 553 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         assert_eq!(ci.channels.len(), 5, "DHPR should have 5 channels");

@@ -35,11 +35,10 @@ cargo +nightly fuzz run fuzz_reader
   fully-realistic starting point.
 - `seed_minimal`: a small hand-built bundle with normal, in-bounds scan
   offsets. Fast to mutate.
-- `seed_huge_offset_regression`: locks in the fix for a `.IDX` scan whose
-  Variant B `dat_offset` fields, taken at face value, imply a scan length
-  of ~4.29 GB while the real `.DAT` file is 64 bytes. Before `scan_slice`
-  capped the computed length against the real, already-known `.DAT` file
-  size, this made `read_slice` attempt an allocation sized from unvalidated
-  file-controlled offsets - under a virtual-memory limit (a realistic
-  hardening measure), that aborts the process (`SIGABRT`) rather than
-  returning a `Result::Err`.
+- `seed_huge_offset_regression`: a `.IDX` scan whose Variant B
+  `dat_offset` fields, taken at face value, imply a scan length of ~4.29 GB
+  while the real `.DAT` file is 64 bytes. `scan_slice` checks offsets
+  against the real `.DAT` size and returns an error. Without that check,
+  `read_slice` would allocate from unvalidated file-controlled offsets,
+  which under a virtual-memory limit aborts the process (`SIGABRT`) rather
+  than returning a `Result::Err`.

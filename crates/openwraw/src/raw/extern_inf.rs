@@ -489,20 +489,14 @@ MSMS End Mass\t2000.0\r\n\
         }
     }
 
-    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
-    /// out as a sibling of this repo; skip silently when it's absent.
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../SpecLance/corpus/waters")
-    }
-
     #[test]
     fn corpus_pxd035818_targeted_msms_set_mass() {
-        let path =
-            corpus_dir().join("PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw/_extern.inf");
-        if !path.exists() {
+        let Some(raw) =
+            crate::test_corpus::bundle(&["PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw"])
+        else {
             return;
-        }
+        };
+        let path = raw.join("_extern.inf");
         let ext = ExternInf::from_path(&path).unwrap();
         let f1 = ext.functions.get(&1).expect("Function 1 missing");
         assert_eq!(f1.mode, FunctionMode::Msms);

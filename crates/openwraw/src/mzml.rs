@@ -21,7 +21,7 @@ use openmassspec_core as msc;
 
 use crate::raw::chroms::{read_chro_dat, ChromsInf};
 use crate::raw::data::ImsSpectrum;
-use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Reader};
+use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Encoding, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
 const SOFTWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -40,10 +40,7 @@ fn native_id_format_cv() -> msc::CvTerm {
 /// `Instrument` field. Falls back to the generic Waters term when the model
 /// string is unrecognized.
 ///
-/// Every entry here was checked directly against psi-ms.obo (a prior
-/// version of this table had several fabricated-looking accessions, e.g.
-/// `XEVO G2-XS QTOF` pointed at `MS:1002472` = "trap-type
-/// collision-induced dissociation", a completely unrelated CV category).
+/// Every entry here is checked directly against psi-ms.obo.
 ///
 /// `SYNAPT G2-S`, `SYNAPT G2`, and bare `SYNAPT` are deliberately *not* in
 /// this table: the real CV only defines "HDMS" and "MS" (non-HDMS)
@@ -232,9 +229,22 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         acquisition_software_name: None,
         acquisition_software_version: None,
         start_timestamp,
-        mobility_array_kind: Some(msc::MobilityArrayKind::DriftTimeMilliseconds),
+        mobility_array_kind: emits_mobility_arrays(reader)
+            .then_some(msc::MobilityArrayKind::DriftTimeMilliseconds),
         analyzers: Vec::new(),
     }
+}
+
+/// Whether any spectrum this reader exports carries a drift-time array.
+///
+/// Only Encoding B (SYNAPT IMS) decodes to [`DecodedSpectrum::Ims`], and
+/// `Reader::iter_spectra` skips lock-mass functions, so a run declares a
+/// mobility array kind only when a non-lock-mass Encoding B function exists.
+fn emits_mobility_arrays(reader: &Reader) -> bool {
+    reader
+        .functions
+        .iter()
+        .any(|f| f.encoding == Encoding::B && !f.info.is_lock_mass())
 }
 
 /// Pool an IMS scan's drift bins into a single MS spectrum.
@@ -305,7 +315,7 @@ fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
 ///
 /// Returns `None` (rather than `Some` with every field `None`) when neither
 /// source has anything to report, so a spectrum with genuinely no precursor
-/// information looks the same as it did before this field was wired up.
+/// information has no `<precursor>` element.
 ///
 /// No charge state or isolation width field has been found in either file
 /// for any corpus sample (targeted or MSe); this is a real gap in what
@@ -383,15 +393,24 @@ fn chromatogram_type_for_units(units: &str) -> Option<msc::CvTerm> {
 ///
 /// Returns an empty vec (not an error) when `_CHROMS.INF` is absent, per its
 /// own docs: direct-infusion / pure-MS bundles don't record LC channels.
-/// Likewise a channel or its companion `.DAT` file that fails to parse is
-/// skipped rather than aborting the whole run, matching `iter_spectra`'s
-/// skip-on-decode-failure contract.
+/// A `_CHROMS.INF`, channel, or companion `.DAT` file that cannot be read
+/// is logged at warn level and skipped rather than aborting the whole run,
+/// matching `iter_spectra`'s skip-and-log contract.
 fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
-    let Some(inf_path) = find_file(dir, "_CHROMS.INF").ok().flatten() else {
-        return Vec::new();
+    let inf_path = match find_file(dir, "_CHROMS.INF") {
+        Ok(Some(path)) => path,
+        Ok(None) => return Vec::new(),
+        Err(e) => {
+            log::warn!("{}: cannot look up _CHROMS.INF: {e}", dir.display());
+            return Vec::new();
+        }
     };
-    let Ok(inf) = ChromsInf::from_path(&inf_path) else {
-        return Vec::new();
+    let inf = match ChromsInf::from_path(&inf_path) {
+        Ok(inf) => inf,
+        Err(e) => {
+            log::warn!("{}: skipping chromatograms: {e}", inf_path.display());
+            return Vec::new();
+        }
     };
 
     let mut out = Vec::new();
@@ -400,14 +419,39 @@ fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
             continue;
         };
         let chro_num = inf.chro_number_for_channel(ch.index);
-        let Some(dat_path) = find_file(dir, &format!("_CHRO{chro_num:03}.DAT"))
-            .ok()
-            .flatten()
-        else {
-            continue;
+        let dat_name = format!("_CHRO{chro_num:03}.DAT");
+        let dat_path = match find_file(dir, &dat_name) {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                log::warn!(
+                    "{}: channel {} ({}): {dat_name} not found, skipping",
+                    dir.display(),
+                    ch.index,
+                    ch.name
+                );
+                continue;
+            }
+            Err(e) => {
+                log::warn!(
+                    "{}: channel {} ({}): cannot look up {dat_name}: {e}",
+                    dir.display(),
+                    ch.index,
+                    ch.name
+                );
+                continue;
+            }
         };
-        let Ok(points) = read_chro_dat(&dat_path) else {
-            continue;
+        let points = match read_chro_dat(&dat_path) {
+            Ok(points) => points,
+            Err(e) => {
+                log::warn!(
+                    "{}: channel {} ({}) skipped: {e}",
+                    dat_path.display(),
+                    ch.index,
+                    ch.name
+                );
+                continue;
+            }
         };
         let scale = ch.scale_f as f32;
         let time_sec = points.iter().map(|p| p.rt_min * 60.0).collect();
@@ -573,15 +617,36 @@ impl msc::SpectrumSource for WatersSource {
     fn run_metadata(&self) -> msc::RunMetadata {
         run_metadata_for(&self.reader)
     }
+    /// Scans that fail to decode are skipped. Each failure is logged at warn
+    /// level, and the total is logged once the iterator is exhausted.
     fn iter_spectra<'s>(&'s mut self) -> Box<dyn Iterator<Item = msc::SpectrumRecord> + 's> {
         let reader = &self.reader;
         let mut scan_counter: u32 = 0;
-        Box::new(reader.iter_spectra().filter_map(move |decoded| {
+        let skipped = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let skipped_in_loop = std::rc::Rc::clone(&skipped);
+        let records = reader.iter_spectra().filter_map(move |decoded| {
             scan_counter += 1;
-            decoded
-                .ok()
-                .map(|scan| record_from_scan(reader, scan_counter, scan))
-        }))
+            match decoded {
+                Ok(scan) => Some(record_from_scan(reader, scan_counter, scan)),
+                Err(e) => {
+                    skipped_in_loop.set(skipped_in_loop.get() + 1);
+                    log::warn!("skipping scan {scan_counter}: {e}");
+                    None
+                }
+            }
+        });
+        let summary = std::iter::once_with(move || {
+            if skipped.get() > 0 {
+                log::warn!(
+                    "{}: {} scan(s) failed to decode and were skipped",
+                    reader.bundle_name,
+                    skipped.get()
+                );
+            }
+            None
+        })
+        .flatten();
+        Box::new(records.chain(summary))
     }
     fn spectrum_count_hint(&self) -> Option<usize> {
         Some(self.reader.total_scan_count())
@@ -705,23 +770,16 @@ mod tests {
         }
     }
 
-    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
-    /// out as a sibling of this repo; skip silently when it's absent.
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../SpecLance/corpus/waters")
-    }
-
     // Sigilweaver/OpenWRaw#8 / #13: targeted MS/MS ("TOF MSMS FUNCTION", Set
-    // Mass = 884.9) must populate `precursor.target_mz`, unlike the
-    // broadband MSe/HDMSe corpus this crate previously had exclusive access
-    // to, which has no discrete precursor at all.
+    // Mass = 884.9) must populate `precursor.target_mz`, unlike broadband
+    // MSe/HDMSe acquisitions, which have no discrete precursor at all.
     #[test]
     fn corpus_pxd035818_targeted_msms_populates_precursor_target_mz() {
-        let dir = corpus_dir().join("PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw");
-        if !dir.exists() {
+        let Some(dir) =
+            crate::test_corpus::bundle(&["PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw"])
+        else {
             return;
-        }
+        };
         let reader = Reader::open(&dir).unwrap();
         let records = collect_records(&reader).unwrap();
         assert!(!records.is_empty());
@@ -747,10 +805,9 @@ mod tests {
     // though collision_energy is available from `_FUNCnnn.STS`.
     #[test]
     fn corpus_pxd075602_hdmse_has_collision_energy_but_no_target_mz() {
-        let dir = corpus_dir().join("PXD075602/DHPR_11257-1.raw");
-        if !dir.exists() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
         let reader = Reader::open(&dir).unwrap();
         let records = collect_records(&reader).unwrap();
         let ms2: Vec<_> = records.iter().filter(|r| r.ms_level == 2).collect();
@@ -771,6 +828,75 @@ mod tests {
                 rec.scan_number
             );
         }
+    }
+
+    fn reader_with_functions(functions: &[(Encoding, u8)]) -> Reader {
+        use crate::raw::functions_inf::FunctionInfo;
+        use crate::raw::index::ScanIndex;
+        use crate::reader::FunctionEntry;
+        let functions = functions
+            .iter()
+            .enumerate()
+            .map(|(i, &(encoding, scan_subtype))| FunctionEntry {
+                index: i as u32 + 1,
+                info: FunctionInfo {
+                    index: i as u32 + 1,
+                    function_type: 0,
+                    scan_subtype,
+                    cycle_time_s: 0.0,
+                    interscan_delay_s: 0.0,
+                    scan_time_s: 0.0,
+                    tof_depth: 0,
+                    mz_low: 0.0,
+                    mz_high: 0.0,
+                },
+                scan_index: ScanIndex::B(Vec::new()),
+                dat_path: std::path::PathBuf::new(),
+                dat_size: 0,
+                encoding,
+                cal: Default::default(),
+                sts: None,
+            })
+            .collect();
+        Reader {
+            dir: std::path::PathBuf::from("example.raw"),
+            bundle_name: "example.raw".into(),
+            header: Default::default(),
+            extern_inf: "Lteff 2200\nVeff 5000".parse().unwrap(),
+            functions,
+        }
+    }
+
+    #[test]
+    fn source_skips_scans_that_fail_to_decode() {
+        use crate::raw::index::{ScanIndex, ScanIndexB};
+        use msc::SpectrumSource;
+        let mut reader = reader_with_functions(&[(Encoding::C, 0)]);
+        // Offset past the end of a 0-byte DAT: scan_slice rejects it.
+        reader.functions[0].scan_index = ScanIndex::B(vec![ScanIndexB {
+            dat_offset: 100,
+            retention_time_min: 0.0,
+        }]);
+        assert!(reader.decode_scan(1, 0).is_err());
+        let mut source = WatersSource::new(reader);
+        assert_eq!(source.iter_spectra().count(), 0);
+    }
+
+    #[test]
+    fn mobility_array_kind_only_declared_when_ims_arrays_are_emitted() {
+        let kind = |functions: &[(Encoding, u8)]| {
+            run_metadata_for(&reader_with_functions(functions)).mobility_array_kind
+        };
+        // Non-IMS run: no drift-time arrays, so no mobility kind.
+        assert_eq!(kind(&[(Encoding::C, 0)]), None);
+        assert_eq!(kind(&[(Encoding::A, 0), (Encoding::D, 0)]), None);
+        // IMS function exported: drift time in milliseconds.
+        assert_eq!(
+            kind(&[(Encoding::B, 0), (Encoding::B, 0x80)]),
+            Some(msc::MobilityArrayKind::DriftTimeMilliseconds)
+        );
+        // IMS only on a lock-mass function, which iter_spectra skips.
+        assert_eq!(kind(&[(Encoding::C, 0), (Encoding::B, 0x80)]), None);
     }
 
     #[test]

@@ -5,6 +5,8 @@ pub mod raw;
 pub mod reader;
 
 pub(crate) mod bytes;
+#[cfg(test)]
+pub(crate) mod test_corpus;
 
 pub use reader::{DecodedScan, DecodedSpectrum, Encoding, FunctionEntry, Reader};
 

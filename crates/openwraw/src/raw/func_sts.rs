@@ -316,20 +316,12 @@ mod tests {
 
     // -- Corpus integration tests --
 
-    /// The shared vendor corpus lives in the SpecLance umbrella repo, checked
-    /// out as a sibling of this repo; tests skip silently when it's absent
-    /// (e.g. in a checkout that doesn't have SpecLance cloned alongside).
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../SpecLance/corpus/waters")
-    }
-
     #[test]
     fn corpus_pxd058812_collision_energy() {
-        let raw = corpus_dir().join("PXD058812/molecular_mass_P15_01.raw/_FUNC001.STS");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD058812/molecular_mass_P15_01.raw"]) else {
             return;
-        }
+        };
+        let raw = raw.join("_FUNC001.STS");
         // Per docs/docs/format/07-func-sts.md: n_desc=25, scan_sz=63, n_scans=197,
         // Collision Energy = 10.0 eV throughout (non-IMS QTOF, MS-only function).
         let sts = FuncSts::from_path(&raw).unwrap();
@@ -345,10 +337,10 @@ mod tests {
 
     #[test]
     fn corpus_pxd075602_collision_energy() {
-        let raw = corpus_dir().join("PXD075602/DHPR_11257-1.raw/_FUNC001.STS");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
+        let raw = raw.join("_FUNC001.STS");
         // Per docs/docs/format/07-func-sts.md: n_desc=56, scan_sz=167, n_scans=1150,
         // Collision Energy = 4.0 eV.
         let sts = FuncSts::from_path(&raw).unwrap();
