@@ -87,10 +87,21 @@ Key facts:
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
 | 0x10   | u32  | No        | 4-byte field; interpreted as f32 gives scan-varying values (~18577 in WANG) but some scans have non-physical f32 garbage; purpose unclear |
 | 0x14   | u16  | No        | Hardware register; large values (35124-65208 in WANG); purpose unknown |
-| 0x16   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x1A   | u32  | No        | Always 0 in tested datasets |
+| 0x16   | u32  | **Yes**   | Byte offset into .DAT file, low 32 bits |
+| 0x1A   | u32  | **Yes**   | Byte offset into .DAT file, high 32 bits (0 while the DAT is under 4 GiB) |
+
+The DAT offset is a 64-bit little-endian value at +0x16..+0x1E. Most DAT
+files are under 4 GiB, so the high word at +0x1A is usually 0, which is why
+earlier notes described it as always 0. Functions with a larger DAT set it
+once the offset crosses 4 GiB: in PXD045625 `Abu_190520_Sha11.raw`,
+`_FUNC001.IDX` scan 2699 has low word 1,626,312 and high word 1
+(offset 4,296,593,608). A corpus sweep found three such functions
+(7.0 GB, 5.9 GB and 4.5 GB DAT files) and 2,708 affected scans. Reading
+only the low word wraps the offset back to the start of the file.
 
 Validated: sum of (IDX[i+1].offset - IDX[i].offset) for all i = DAT file size exactly.
+Offsets are non-decreasing and never exceed the DAT size in the corpus; the
+reader rejects a scan whose offsets go backwards or past the end of the DAT.
 
 ### Field +0x04: Hardware tick counter
 

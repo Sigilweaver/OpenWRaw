@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Read the 30-byte (Variant B) `_FUNCnnn.IDX` DAT offset as 64 bits: the
+  low word at +0x16 and the high word at +0x1A. The high word, previously
+  documented as always 0, is set once a function's `_FUNCnnn.DAT` exceeds
+  4 GiB. Before this fix, every scan past the 4 GiB mark decoded bytes from
+  the start of the file, and the scan just before it came back empty. Seen
+  in three public functions (PXD045625, PXD071342) covering 2,708 scans.
+- Reject a scan whose `_FUNCnnn.IDX` offsets go backwards or point past the
+  end of `_FUNCnnn.DAT` with an error instead of silently decoding a
+  truncated or unrelated byte range.
+
+### Changed
+
+- **Breaking (Rust):** `ScanIndexB::dat_offset` is now `u64` (was `u32`).
+  The Python `index_record` dictionary returns the full 64-bit value.
+
 ## [4.0.0] - 2026-10-04
 
 ### Fixed

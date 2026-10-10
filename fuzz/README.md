@@ -38,8 +38,8 @@ cargo +nightly fuzz run fuzz_reader
 - `seed_huge_offset_regression`: locks in the fix for a `.IDX` scan whose
   Variant B `dat_offset` fields, taken at face value, imply a scan length
   of ~4.29 GB while the real `.DAT` file is 64 bytes. Before `scan_slice`
-  capped the computed length against the real, already-known `.DAT` file
-  size, this made `read_slice` attempt an allocation sized from unvalidated
+  checked the offsets against the real, already-known `.DAT` file size
+  (it now returns an error for them), this made `read_slice` attempt an allocation sized from unvalidated
   file-controlled offsets - under a virtual-memory limit (a realistic
   hardening measure), that aborts the process (`SIGABRT`) rather than
   returning a `Result::Err`.

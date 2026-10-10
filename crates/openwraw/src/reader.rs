@@ -475,11 +475,14 @@ pub enum DecodedSpectrum {
 /// length implied by `entry.dat_size`.
 ///
 /// `dat_offset` and (for Variant B) the next record's `dat_offset` are raw
-/// fields read straight from the `.IDX` file, so `length` is capped against
-/// `entry.dat_size` (the real, already-known size of the paired `.DAT` file)
-/// before returning: an IDX record claiming a scan larger than the DAT file
-/// that actually exists must not be able to force an allocation sized from
-/// unvalidated file-controlled offsets in `read_slice`.
+/// fields read straight from the `.IDX` file. An offset past the end of the
+/// paired `.DAT` file, or (Variant B) a next offset that goes backwards or
+/// past the end, is rejected with an error instead of decoding bytes that do
+/// not belong to the scan. Variant A's `length` is still capped against
+/// `entry.dat_size` (the real, already-known size of the `.DAT` file): an
+/// IDX record claiming a scan larger than the DAT file that actually exists
+/// must not be able to force an allocation sized from unvalidated
+/// file-controlled values in `read_slice`.
 fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64, f32)> {
     let (offset, length, retention_time_min) = match &entry.scan_index {
         ScanIndex::A(records) => {
@@ -491,7 +494,14 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
             })?;
             // Variant A stores the record count directly; the width depends
             // on the DAT layout (6 bytes for A, 8 for D, 12 for E).
-            let offset = rec.dat_offset as u64;
+            let offset = u64::from(rec.dat_offset);
+            if offset > entry.dat_size {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: DAT offset {offset} is past the end of \
+                     {}-byte DAT file",
+                    entry.index, entry.dat_size
+                )));
+            }
             let width = match entry.encoding {
                 Encoding::A => 6,
                 Encoding::E => 12,
@@ -507,13 +517,26 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                     entry.index, scan_idx
                 ))
             })?;
-            let offset = rec.dat_offset as u64;
+            let offset = rec.dat_offset;
             let next_offset = records
                 .get(scan_idx + 1)
-                .map(|r| r.dat_offset as u64)
+                .map(|r| r.dat_offset)
                 .unwrap_or(entry.dat_size);
-            let length = next_offset.saturating_sub(offset);
-            (offset, length, rec.retention_time_min)
+            if offset > entry.dat_size || next_offset > entry.dat_size {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: DAT offsets {offset}..{next_offset} \
+                     extend past the end of {}-byte DAT file",
+                    entry.index, entry.dat_size
+                )));
+            }
+            if next_offset < offset {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: next scan's DAT offset {next_offset} \
+                     is before this scan's offset {offset}",
+                    entry.index
+                )));
+            }
+            (offset, next_offset - offset, rec.retention_time_min)
         }
     };
     let remaining = entry.dat_size.saturating_sub(offset);
@@ -587,12 +610,12 @@ mod tests {
     // A corrupt/malicious IDX can claim a scan far larger than the real DAT
     // file: dat_offset=0 for this scan, dat_offset=u32::MAX-1 for the "next"
     // scan used to compute Variant B's length by subtraction. Before this
-    // was capped, `read_slice` would allocate a `Vec` sized from that
+    // was checked, `read_slice` would allocate a `Vec` sized from that
     // difference (up to ~4.29 GB) regardless of how small the real DAT file
     // on disk actually is - which aborts the process under a virtual-memory
     // limit rather than returning a recoverable error.
     #[test]
-    fn variant_b_scan_slice_caps_length_to_dat_size() {
+    fn variant_b_next_offset_beyond_dat_size_is_error() {
         let entry = entry_with(
             ScanIndex::B(vec![
                 ScanIndexB {
@@ -600,19 +623,18 @@ mod tests {
                     retention_time_min: 0.0,
                 },
                 ScanIndexB {
-                    dat_offset: u32::MAX - 1,
+                    dat_offset: u64::from(u32::MAX - 1),
                     retention_time_min: 0.1,
                 },
             ]),
             64, // real DAT file is tiny
         );
-        let (offset, length, _) = scan_slice(&entry, 0).unwrap();
-        assert_eq!(offset, 0);
-        assert!(length <= 64, "length {length} exceeds dat_size 64");
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("past the end"), "{error}");
     }
 
     #[test]
-    fn variant_b_offset_beyond_dat_size_yields_zero_length() {
+    fn variant_b_offset_beyond_dat_size_is_error() {
         let entry = entry_with(
             ScanIndex::B(vec![ScanIndexB {
                 dat_offset: 1_000_000,
@@ -620,8 +642,66 @@ mod tests {
             }]),
             64,
         );
-        let (_, length, _) = scan_slice(&entry, 0).unwrap();
-        assert_eq!(length, 0);
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("past the end"), "{error}");
+    }
+
+    #[test]
+    fn variant_b_backwards_offset_is_error() {
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: 40,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: 8,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            100,
+        );
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("before this scan's offset"), "{error}");
+        // The last scan runs to EOF and is still readable.
+        assert_eq!(scan_slice(&entry, 1).unwrap(), (8, 92, 0.1));
+    }
+
+    // Offsets above 4 GiB (high word at IDX +0x1A) must be used as-is, not
+    // truncated to 32 bits, so the slice lands in the right place of a large
+    // DAT file.
+    #[test]
+    fn variant_b_offsets_above_four_gib_are_used_in_full() {
+        let base = (1u64 << 32) + 1_626_312;
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: base,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: base + 800,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            base + 1000,
+        );
+        assert_eq!(scan_slice(&entry, 0).unwrap(), (base, 800, 0.0));
+        assert_eq!(scan_slice(&entry, 1).unwrap(), (base + 800, 200, 0.1));
+    }
+
+    #[test]
+    fn variant_a_offset_beyond_dat_size_is_error() {
+        let entry = entry_with(
+            ScanIndex::A(vec![ScanIndexA {
+                dat_offset: 1_000,
+                n_records: 1,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            }]),
+            64,
+        );
+        assert!(scan_slice(&entry, 0).is_err());
     }
 
     #[test]
