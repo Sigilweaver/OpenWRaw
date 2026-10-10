@@ -35,23 +35,27 @@ Optional Python bindings are available via the
 | `_extern.inf` (instrument geometry)             | supported  |
 | `_FUNCTNS.INF` (function descriptors)           | supported  |
 | `_FUNCnnn.IDX` Variant A (22-byte)              | supported  |
-| `_FUNCnnn.IDX` Variant B (30-byte, IMS-capable) | supported  |
+| `_FUNCnnn.IDX` Variant B (30-byte)              | supported  |
 | `_FUNCnnn.DAT` Encoding A (6-byte records)      | supported  |
-| `_FUNCnnn.DAT` Encoding B (8-byte IMS cells)    | supported  |
-| `_FUNCnnn.DAT` Encoding C (8-byte sub-bin)      | supported  |
 | `_FUNCnnn.DAT` Encoding D (8-byte floating m/z) | supported  |
-| `_FUNCnnn.DAT` Encoding E (12-byte LCT records) | supported for public MTBLS701/MTBLS13770 fixtures; flags/auxiliary word unresolved |
+| `_FUNCnnn.DAT` Encoding E (12-byte records)     | supported for public LCT Premier and Xevo G2-XS lock-mass fixtures; flags/auxiliary word unresolved |
+| Ion mobility (drift time)                       | not decoded |
+| Lock-mass correction                            | not applied |
 | `_CHROMS.INF` + `_CHROnnnn.DAT` chromatograms   | supported  |
 | mzML export                                     | supported  |
 | Apex3D `.bin` files                             | best-effort|
 
 Validated instrument classes:
 
-| Instrument class    | Encoding | IDX Variant |
-| ------------------- | -------- | ----------- |
-| QTOF Ultima         | A        | A           |
-| SYNAPT G2-Si (IMS)  | B        | B           |
-| Xevo G2-XS QTof     | C        | B           |
+| Instrument class              | Encoding | IDX Variant |
+| ----------------------------- | -------- | ----------- |
+| QTOF Ultima                   | A        | A           |
+| Vion (UNIFI export), SYNAPT G2 | D       | A           |
+| SYNAPT G2-S / G2-Si / XS      | D        | B           |
+| Xevo G2-XS QTof, Xevo G3      | D (some lock-mass functions E) | B |
+
+SYNAPT scans are decoded as m/z and intensity only; ion mobility is not
+decoded.
 
 ## Next steps
 

@@ -32,11 +32,11 @@ lock-mass correction.
 
 | Encoding | Lock functions | Pass | Fail | No reference peak |
 | --- | ---: | ---: | ---: | ---: |
-| A (6-byte) and D (8-byte, 22-byte index) | 54 | 51 | 1 | 2 |
-| B and C (8-byte, 30-byte index) | 18 | 0 | 4 | 14 |
+| A (6-byte) and D (8-byte), 22-byte index | 54 | 51 | 1 | 2 |
+| D (8-byte) and E (12-byte), 30-byte index | 18 | 15 | 2 | 1 |
 
-Encodings A and D store m/z as a floating-point word; see
-`docs/docs/format/04-func-dat.md` for the layout and its validation.
+Encodings A, D and E store m/z as a floating-point word; see
+`docs/docs/format/04-func-dat.md` for the layouts and their validation.
 
 - Vion/UNIFI (45 runs, issue #33): +20 to +69 ppm, with one offset per
   acquisition batch. The saturated monoisotopic Leu-Enk peak centroids
@@ -50,12 +50,18 @@ Encodings A and D store m/z as a floating-point word; see
 - PXD010569 lock functions contain a cluster series 97.98 Da apart rather
   than Leu-Enk or Glu-fib, so they are not scored.
 
-**Encodings B and C are not yet accurate.** Their decoders anchor the first
-and last record of each scan to the declared mass range. None of their lock
-functions passes; four fail by 134-645 ppm and the rest do not show an
-isotope-confirmed reference at all. Every 30-byte-index function sampled
-passes the same floating-point m/z and ADC-sample checks as Encoding D,
-which points to the fix.
+30-byte index (SYNAPT G2-S/G2-Si/XS, Xevo G2-XS, Xevo G3):
+
+- 14 lock functions sit within 76 ppm (-75.6 to +66.5), including the
+  12-byte Xevo G2-XS lock functions at +9.5 to +11.0 ppm.
+- PXD069628 (Xevo G3): HC18_CE passes at -97.6 ppm and HC20_CE fails at
+  -107.9 ppm.
+- PXD001175 `S121126_06.raw` (SYNAPT G2-S) fails at +161.7 ppm on Glu-fib.
+- In these three, the offset is uniform across the reference peak and its
+  isotope, which points to instrument calibration at acquisition time
+  rather than the record model; this has not been proven.
+- PXD005960's lock function holds one scan whose dominant ion (m/z 825.1)
+  is not a known lock compound, so it is not scored.
 
 ## Reproduce
 
@@ -65,5 +71,5 @@ cargo run -p openwraw --release --example audit_corpus -- /mnt/nas/Data/WRaw --l
 ```
 
 The command exits non-zero if any bundle fails to decode or any lock-mass
-function fails, so it currently exits 1 because of the B and C failures and
-PXD029515.
+function fails, so it currently exits 1 because of the PXD029515,
+PXD069628 HC20_CE and PXD001175 lock functions.

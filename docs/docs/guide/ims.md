@@ -4,27 +4,15 @@ sidebar_position: 3
 
 # Ion mobility (IMS)
 
-SYNAPT-class instruments produce ion-mobility data via Encoding B, in
-which each scan is subdivided into mobility cells (sub-bins) keyed by
-drift time. `read_ims_spectrum` returns the full flat spectrum with a
-per-peak `drift_time_ms` column.
+OpenWRaw does not decode ion mobility.
 
-```rust
-use openwraw::RawReader;
+SYNAPT acquisitions open and decode like any other bundle: each scan is
+returned as calibrated m/z and intensity, the same as for a QTof without a
+mobility cell. There is no drift-time output in Rust or Python, mzML output
+carries no mobility arrays, and no run declares a mobility array kind.
 
-let r = RawReader::open("synapt.raw")?;
-let ims = r.read_ims_spectrum(1, 0)?;
-for (mz, dt, intensity) in itertools::izip!(&ims.mz, &ims.drift_time_ms, &ims.intensity) {
-    println!("{mz:.4}\t{dt:.3}\t{intensity:.0}");
-}
-```
-
-In Python the same data is exposed via NumPy arrays:
-
-```python
-ims = r.read_ims_spectrum(1, 0)
-print(ims.mz.dtype, ims.drift_time_ms.shape, ims.intensity.shape)
-```
-
-The drift time is derived from the sub-bin index and the pusher
-interval reported by `_extern.inf` (the `a_us` field).
+In the public corpus, SYNAPT functions store 8-byte Encoding D records, and
+within every sampled scan m/z never decreases, so a stored scan is not split
+into drift-ordered blocks. Where the drift time is recorded is not yet
+known; see the [format specification](../format/func-dat) for what has been
+established.

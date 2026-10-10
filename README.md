@@ -73,6 +73,19 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
+## Known issues
+
+- **No ion mobility decoding.** SYNAPT scans are returned as m/z and
+  intensity only. There is no drift-time output, and mzML output carries no
+  mobility arrays.
+- **No lock-mass correction.** m/z uses only the calibration stored in
+  `_HEADER.TXT`. Lock-mass functions are skipped when iterating spectra and
+  are not used to correct the others. Across the public test corpus the
+  uncorrected lock-mass reference sits within about 75 ppm for most
+  bundles and up to about 160 ppm for a few.
+- Encoding E (12-byte records) intensity flag bits and auxiliary word are
+  not interpreted; flagged peaks are kept.
+
 ## Debug logging
 
 OpenWRaw logs how it reads a bundle: which side files it resolved

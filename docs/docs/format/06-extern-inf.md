@@ -38,9 +38,12 @@ There is no strict alignment requirement; fields are whitespace-separated
 with the field name (possibly multi-word, possibly containing parentheses
 and units) on the left and the value on the right.
 
-## Key Fields for m/z Decoding
+## Flight-Time Geometry Fields
 
-These fields are required to convert a stored TOF bin index to m/z.
+No `_FUNCnnn.DAT` encoding stores a TOF bin; every encoding stores m/z
+directly and only the `_HEADER.TXT` polynomial is applied. These fields
+describe the flight-time geometry. They are used to check the ADC sample
+spacing of Encoding D records (`t = A_us * sqrt(m/z)`), not to decode m/z.
 All are in the `Instrument Configuration:` section unless noted.
 
 | Field Name | Units | Description |
@@ -49,14 +52,7 @@ All are in the `Instrument Configuration:` section unless noted.
 | `Veff`  | V  | Effective accelerating voltage |
 | `PusherInterval` | µs | Actual pusher cycle period (authoritative value) |
 
-`PusherInterval` is the field used to convert a bin index to a raw flight
-time:
-
-```
-t_raw_us = tof_bin * (PusherInterval / 65536)
-```
-
-Several other field names encode the same physical quantity but appear in
+`PusherInterval` is the pusher cycle period. Several other field names encode the same physical quantity but appear in
 different instrument generations or contexts:
 
 | Also observed | Notes |
@@ -197,4 +193,4 @@ in the corpus (Sigilweaver/OpenWRaw#13); Function 1's `Set Mass` reads
 ## Reference Sources
 
 - Corpus files: all `_extern.inf` files in PXD058812, PXD066594, PXD068881, PXD075602, PXD035818
-- Used by: `_HEADER.TXT` calibration polynomial, `_FUNCnnn.DAT` Encoding A/C m/z decode, `mzml::precursor_info_for` (`target_mz`)
+- Used by: `mzml::precursor_info_for` (`target_mz`). `ExternInf::a_us()` (flight-time constant from `Lteff`/`Veff`) is parsed but not used by any DAT decoder, since every encoding stores m/z directly

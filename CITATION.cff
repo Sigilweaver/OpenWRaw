@@ -15,9 +15,9 @@ abstract: >
   OpenWRaw is a standalone, cross-platform reader for Waters MassLynx .raw
   acquisition directories, implemented in pure Rust with no dependency on
   vendor DLLs. Python bindings built on PyO3 expose functions, scans, and
-  ion-mobility data as native Python objects from Waters QTof and SYNAPT
-  instrument families, ready to be assembled into a Pandas or Polars
-  DataFrame.
+  spectra as native Python objects from Waters QTof and SYNAPT instrument
+  families, ready to be assembled into a Pandas or Polars DataFrame. Ion
+  mobility is not decoded.
 license: "Apache-2.0"
 license-url: "https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE"
 date-released: "2026-05-31"
@@ -28,7 +28,6 @@ keywords:
   - Waters
   - MassLynx
   - raw
-  - ion mobility
   - bioinformatics
   - Rust
   - Python
