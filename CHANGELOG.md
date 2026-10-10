@@ -9,38 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Read the 30-byte (Variant B) `_FUNCnnn.IDX` DAT offset as 64 bits: the
-  low word at +0x16 and the high word at +0x1A. The high word, previously
-  documented as always 0, is set once a function's `_FUNCnnn.DAT` exceeds
-  4 GiB. Before this fix, every scan past the 4 GiB mark decoded bytes from
-  the start of the file, and the scan just before it came back empty. Seen
-  in three public functions (PXD045625, PXD071342) covering 2,708 scans.
-- Reject a scan whose `_FUNCnnn.IDX` offsets go backwards or point past the
-  end of `_FUNCnnn.DAT` with an error instead of silently decoding a
-  truncated or unrelated byte range.
-- A Variant A scan whose `_FUNCnnn.IDX` `peak_count` exceeds the decoded
-  peak count now logs a warning instead of panicking in debug builds. The
-  value comes from the file, so it is not an internal invariant.
+- Variant B `_FUNCnnn.IDX` DAT offsets are read as 64 bits (low word at
+  +0x16, high word at +0x1A). Scans past 4 GiB in a `_FUNCnnn.DAT` decoded
+  bytes from the start of the file, and the scan before them came back
+  empty. Affected 2,708 scans in three public functions (PXD045625,
+  PXD071342).
+- A scan whose `_FUNCnnn.IDX` offsets go backwards or past the end of
+  `_FUNCnnn.DAT` returns an error instead of decoding a truncated or
+  unrelated byte range.
+- A Variant A `peak_count` larger than the decoded peak count logs a
+  warning instead of panicking in debug builds.
 - Run metadata declares a drift-time mobility array kind only when the run
-  exports drift-time arrays (a non-lock-mass SYNAPT IMS function). Non-IMS
-  runs previously advertised a mobility array that no spectrum carried.
+  exports drift-time arrays (a non-lock-mass SYNAPT IMS function).
+- `WatersSource` logs each scan that fails to decode, and the total, at
+  warn level instead of skipping it silently. Unreadable `_CHROMS.INF`
+  channels and `_CHROnnn.DAT` files are logged the same way.
 
 ### Changed
 
-- Corpus-gated tests now find bundles under one root set by
-  `OPENWRAW_CORPUS` (`<root>/<accession>/<bundle>.raw`) instead of
-  hard-coded `/workspaces/OpenWRaw/corpus` and sibling `SpecLance` paths.
-  With `REQUIRE_CORPUS=1`, a missing bundle fails the test instead of
-  passing silently. CI requires the conformance bundle on Linux and macOS.
-- `cargo doc --no-deps` now builds cleanly from the workspace root: the
-  Python extension crate sets `doc = false` (its lib name collided with the
-  `openwraw` crate's docs), and two rustdoc links to private helpers were
-  replaced with plain code spans.
-- The release workflow no longer ignores a failed `cargo publish`. A
-  crates.io failure now fails the run instead of passing silently; the
-  PyPI jobs do not depend on it.
-- **Breaking (Rust):** `ScanIndexB::dat_offset` is now `u64` (was `u32`).
-  The Python `index_record` dictionary returns the full 64-bit value.
+- **Breaking (Rust):** `ScanIndexB::dat_offset` is `u64` (was `u32`). The
+  Python `index_record` dictionary returns the full 64-bit value.
+- Corpus tests read bundles from `OPENWRAW_CORPUS`
+  (`<root>/<accession>/<bundle>.raw`). With `REQUIRE_CORPUS=1` a missing
+  bundle fails the test; CI requires the conformance bundle on Linux and
+  macOS.
+- `cargo doc --no-deps` builds cleanly from the workspace root.
+- A failed `cargo publish` fails the release run; the PyPI jobs do not
+  depend on it.
 
 ## [4.0.0] - 2026-10-04
 
