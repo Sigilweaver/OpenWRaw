@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Variant A scan whose `_FUNCnnn.IDX` `peak_count` exceeds the decoded
   peak count now logs a warning instead of panicking in debug builds. The
   value comes from the file, so it is not an internal invariant.
+- Run metadata declares a drift-time mobility array kind only when the run
+  exports drift-time arrays (a non-lock-mass SYNAPT IMS function). Non-IMS
+  runs previously advertised a mobility array that no spectrum carried.
 
 ### Changed
 

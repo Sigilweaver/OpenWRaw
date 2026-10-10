@@ -21,7 +21,7 @@ use openmassspec_core as msc;
 
 use crate::raw::chroms::{read_chro_dat, ChromsInf};
 use crate::raw::data::ImsSpectrum;
-use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Reader};
+use crate::reader::{find_file, DecodedScan, DecodedSpectrum, Encoding, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
 const SOFTWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -232,9 +232,22 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         acquisition_software_name: None,
         acquisition_software_version: None,
         start_timestamp,
-        mobility_array_kind: Some(msc::MobilityArrayKind::DriftTimeMilliseconds),
+        mobility_array_kind: emits_mobility_arrays(reader)
+            .then_some(msc::MobilityArrayKind::DriftTimeMilliseconds),
         analyzers: Vec::new(),
     }
+}
+
+/// Whether any spectrum this reader exports carries a drift-time array.
+///
+/// Only Encoding B (SYNAPT IMS) decodes to [`DecodedSpectrum::Ims`], and
+/// `Reader::iter_spectra` skips lock-mass functions, so a run declares a
+/// mobility array kind only when a non-lock-mass Encoding B function exists.
+fn emits_mobility_arrays(reader: &Reader) -> bool {
+    reader
+        .functions
+        .iter()
+        .any(|f| f.encoding == Encoding::B && !f.info.is_lock_mass())
 }
 
 /// Pool an IMS scan's drift bins into a single MS spectrum.
@@ -771,6 +784,60 @@ mod tests {
                 rec.scan_number
             );
         }
+    }
+
+    fn reader_with_functions(functions: &[(Encoding, u8)]) -> Reader {
+        use crate::raw::functions_inf::FunctionInfo;
+        use crate::raw::index::ScanIndex;
+        use crate::reader::FunctionEntry;
+        let functions = functions
+            .iter()
+            .enumerate()
+            .map(|(i, &(encoding, scan_subtype))| FunctionEntry {
+                index: i as u32 + 1,
+                info: FunctionInfo {
+                    index: i as u32 + 1,
+                    function_type: 0,
+                    scan_subtype,
+                    cycle_time_s: 0.0,
+                    interscan_delay_s: 0.0,
+                    scan_time_s: 0.0,
+                    tof_depth: 0,
+                    mz_low: 0.0,
+                    mz_high: 0.0,
+                },
+                scan_index: ScanIndex::B(Vec::new()),
+                dat_path: std::path::PathBuf::new(),
+                dat_size: 0,
+                encoding,
+                cal: Default::default(),
+                sts: None,
+            })
+            .collect();
+        Reader {
+            dir: std::path::PathBuf::from("example.raw"),
+            bundle_name: "example.raw".into(),
+            header: Default::default(),
+            extern_inf: "Lteff 2200\nVeff 5000".parse().unwrap(),
+            functions,
+        }
+    }
+
+    #[test]
+    fn mobility_array_kind_only_declared_when_ims_arrays_are_emitted() {
+        let kind = |functions: &[(Encoding, u8)]| {
+            run_metadata_for(&reader_with_functions(functions)).mobility_array_kind
+        };
+        // Non-IMS run: no drift-time arrays, so no mobility kind.
+        assert_eq!(kind(&[(Encoding::C, 0)]), None);
+        assert_eq!(kind(&[(Encoding::A, 0), (Encoding::D, 0)]), None);
+        // IMS function exported: drift time in milliseconds.
+        assert_eq!(
+            kind(&[(Encoding::B, 0), (Encoding::B, 0x80)]),
+            Some(msc::MobilityArrayKind::DriftTimeMilliseconds)
+        );
+        // IMS only on a lock-mass function, which iter_spectra skips.
+        assert_eq!(kind(&[(Encoding::C, 0), (Encoding::B, 0x80)]), None);
     }
 
     #[test]
