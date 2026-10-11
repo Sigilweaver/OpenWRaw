@@ -61,7 +61,7 @@ impl FunctionTable {
 
     /// Parse from a raw byte slice.
     pub fn from_bytes(data: &[u8]) -> crate::Result<Self> {
-        if data.len() % RECORD_SIZE != 0 {
+        if !data.len().is_multiple_of(RECORD_SIZE) {
             return Err(crate::Error::Parse(format!(
                 "_FUNCTNS.INF: file size {} is not a multiple of {} (record size)",
                 data.len(),

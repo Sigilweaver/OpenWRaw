@@ -81,7 +81,7 @@ impl ChromsInf {
         }
 
         let remaining = bytes.len() - data_start;
-        if remaining % RECORD_SIZE != 0 {
+        if !remaining.is_multiple_of(RECORD_SIZE) {
             return Err(crate::Error::Parse(format!(
                 "_CHROMS.INF: data section size {remaining} is not a multiple of {RECORD_SIZE}"
             )));
@@ -158,7 +158,7 @@ pub fn parse_chro_bytes(bytes: &[u8]) -> crate::Result<Vec<ChromPoint>> {
     }
 
     let data = &bytes[CHRO_DATA_OFFSET..];
-    if data.len() % 8 != 0 {
+    if !data.len().is_multiple_of(8) {
         return Err(crate::Error::Parse(format!(
             "_CHRO*.DAT data section size {} is not a multiple of 8",
             data.len()
