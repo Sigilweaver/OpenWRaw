@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `FunctionCal::new(cal_type, coeffs)` and
+  `ScanIndex::retention_time_min(scan_idx)`.
+- `From<openwraw::Error> for openmassspec_core::Error`, which wraps the
+  error as `openmassspec_core::Error::Vendor`.
+
 ### Fixed
 
 - Variant B `_FUNCnnn.IDX` DAT offsets are read as 64 bits (low word at
@@ -39,9 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instrument name; the DAT record width is judged from the m/z words of
   sampled scans. This also reads the 12-byte lock-mass functions of some
   Xevo G2-XS bundles, where no reference peak was found before.
-- `WatersSource` logs each scan that fails to decode, and the total, at
-  warn level instead of skipping it silently. Unreadable `_CHROMS.INF`
-  channels and `_CHROnnn.DAT` files are logged the same way.
+- `WatersSource` yields an `Err` in place of each scan that fails to
+  decode instead of skipping it silently, and an `Err` for a `_CHROMS.INF`
+  or a mappable channel's `_CHROnnn.DAT` that cannot be read instead of
+  dropping the chromatogram. `mzml::write_mzml` and `write_indexed_mzml`
+  stop at the first such error.
+- Python `RawReader.iter_records` raises `RuntimeError` for a scan that
+  fails to decode (the next `next()` call continues with the following
+  scan), and `RawReader.read_chromatograms` raises when a channel cannot be
+  read. Both skipped them before.
+- `FuncSts::from_bytes` rejects a `_FUNCnnn.STS` channel that does not fit
+  in the scan record, instead of `FuncSts::value_at` returning `None` for
+  it.
 
 ### Changed
 
@@ -54,6 +70,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DecodeParams::new(cal)`.
 - **Breaking (Python):** `RawReader.function_encoding` returns `"a"`, `"d"`
   or `"e"`.
+- **Breaking (Rust):** requires `openmassspec-core` 3.0 and Rust 1.88.
+  `WatersSource::iter_spectra` and `iter_chromatograms` yield
+  `openmassspec_core::Result` items (`SpectrumIter`, `ChromatogramIter`).
+- **Breaking (Rust):** `mzml::write_mzml` and `mzml::write_indexed_mzml`
+  return `openwraw::Result<openmassspec_core::WriteSummary>` (was
+  `openwraw::Result<()>`). A writer failure is `Error::Core` (was
+  `Error::Io`).
+- **Breaking (Rust):** `openwraw::Error` is `#[non_exhaustive]`, gains
+  variant `Core(openmassspec_core::Error)`, and its `Context` variant is
+  `#[non_exhaustive]`.
+- **Breaking (Rust):** these public types are `#[non_exhaustive]`, so
+  struct literals and exhaustive matches outside the crate no longer
+  compile: structs `ChromChannel`, `ChromsInf`, `ChromPoint`,
+  `ChannelDescriptor`, `ExternFunction`, `ExternInf`, `FunctionCal`,
+  `Header`, `FunctionInfo`, `FunctionTable`, `ScanIndexA`, `ScanIndexB`;
+  enums `ChannelEncoding`, `Polarity`, `FunctionMode`, `CalType`,
+  `ScanIndex`. Read their fields as before; build them with the parsers
+  (`from_bytes`, `from_path`, `str::parse`), `Default`, or
+  `FunctionCal::new`.
 - Corpus tests read bundles from `OPENWRAW_CORPUS`
   (`<root>/<accession>/<bundle>.raw`). With `REQUIRE_CORPUS=1` a missing
   bundle fails the test; CI requires the conformance bundle on Linux and
@@ -71,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decoders.
 - **Breaking (Python):** `ImsSpectrum` and `RawReader.read_ims_spectrum`.
   Ion mobility is not decoded.
+- **Breaking (Rust):** the format constants `functions_inf::RECORD_SIZE`,
+  `index::STRIDE_A` and `index::STRIDE_B` are crate-private. The unused
+  `functions_inf::subtype` module (`OLDER_QTOF_SURVEY`, `G2_SURVEY`,
+  `G2_LOCKMASS`) and `index::VARIANT_A_TYPE_MARKER` are removed; the
+  `FunctionInfo::scan_subtype` docs list the observed values.
 
 ## [4.0.0] - 2026-10-04
 
