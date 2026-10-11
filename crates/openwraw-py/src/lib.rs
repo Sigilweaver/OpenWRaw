@@ -110,11 +110,14 @@ fn normalize_record_json(value: &mut serde_json::Value) {
 }
 
 /// Bounded stream of canonical spectrum records.
+///
+/// A scan that cannot be decoded raises `RuntimeError` from `__next__`;
+/// calling `next()` again continues with the following scan.
 #[pyclass(module = "openwraw")]
 struct RecordIter {
     // `None` marks a complete stream, so a closed channel without it means
     // the decode thread died.
-    receiver: Mutex<Receiver<Option<SpectrumRecord>>>,
+    receiver: Mutex<Receiver<Option<openmassspec_core::Result<SpectrumRecord>>>>,
     finished: bool,
 }
 
@@ -137,7 +140,8 @@ impl RecordIter {
                 .map_err(|_| "record decode thread ended without a result")
         });
         match message {
-            Ok(Some(rec)) => record_object(py, rec).map(Some),
+            Ok(Some(Ok(rec))) => record_object(py, rec).map(Some),
+            Ok(Some(Err(error))) => Err(PyRuntimeError::new_err(error.to_string())),
             Ok(None) => {
                 slf.finished = true;
                 Ok(None)
@@ -470,12 +474,18 @@ impl RawReader {
         )
     }
 
-    /// Canonical TIC, BPC, and other chromatograms with seconds as the time unit.
+    /// Canonical instrument chromatograms with seconds as the time unit.
+    ///
+    /// Raises `RuntimeError` when `_CHROMS.INF` or a channel's
+    /// `_CHROnnn.DAT` cannot be read.
     fn read_chromatograms(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         let mut source = ::openwraw::mzml::WatersSource::new(self.reader.clone());
         source
             .iter_chromatograms()
-            .map(|rec| json_object(py, &rec))
+            .map(|rec| {
+                let rec = rec.map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                json_object(py, &rec)
+            })
             .collect()
     }
 
