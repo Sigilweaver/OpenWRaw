@@ -30,7 +30,9 @@ impl DecodeParams {
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct Spectrum {
+    /// Calibrated m/z (Da), one per point.
     pub mz: Vec<f64>,
+    /// Intensity, one per point.
     pub intensity: Vec<f32>,
 }
 
@@ -61,7 +63,7 @@ fn encoding_a_mz(rec: &[u8]) -> crate::Result<f64> {
 /// records, including those marking the ends of the mass range, are skipped.
 /// The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z).
 pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
-    if scan_bytes.len() % 6 != 0 {
+    if !scan_bytes.len().is_multiple_of(6) {
         return Err(crate::Error::Parse(format!(
             "Encoding A: scan size {} is not a multiple of 6",
             scan_bytes.len()
@@ -72,7 +74,7 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         mz: Vec::with_capacity(n),
         intensity: Vec::with_capacity(n),
     };
-    for rec in scan_bytes.chunks_exact(6) {
+    for rec in scan_bytes.as_chunks::<6>().0 {
         let count = u16::from_le_bytes([rec[0], rec[1]]);
         if count == 0 {
             continue;
@@ -117,7 +119,7 @@ fn encoding_d_mz(u: u32) -> crate::Result<f64> {
 /// Records with zero intensity are skipped. A position word without the
 /// leading mantissa bit is an error, not a skipped record.
 pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
-    if scan_bytes.len() % 8 != 0 {
+    if !scan_bytes.len().is_multiple_of(8) {
         return Err(crate::Error::Parse(format!(
             "Encoding D: scan size {} is not a multiple of 8",
             scan_bytes.len()
@@ -128,7 +130,7 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         mz: Vec::with_capacity(n),
         intensity: Vec::with_capacity(n),
     };
-    for rec in scan_bytes.chunks_exact(8) {
+    for rec in scan_bytes.as_chunks::<8>().0 {
         let intensity = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
         if intensity == 0 {
             continue;
@@ -151,7 +153,7 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
 /// used, since a short scan can fit both by chance.
 pub(crate) fn variant_b_record_width(scan_bytes: &[u8]) -> Option<u64> {
     let fits = |width: usize| {
-        if scan_bytes.len() % width != 0 || scan_bytes.len() / width < 3 {
+        if !scan_bytes.len().is_multiple_of(width) || scan_bytes.len() / width < 3 {
             return false;
         }
         let mut previous = 0u32;
@@ -186,7 +188,7 @@ pub(crate) fn variant_b_record_width(scan_bytes: &[u8]) -> Option<u64> {
 /// Derived from original MTBLS701 and MTBLS13770 bytes and scan-index TIC
 /// self-consistency, without vendor software or vendor-derived output.
 pub fn decode_encoding_e(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
-    if scan_bytes.len() % 12 != 0 {
+    if !scan_bytes.len().is_multiple_of(12) {
         return Err(crate::Error::Parse(format!(
             "Encoding E: scan size {} is not a multiple of 12",
             scan_bytes.len()
@@ -197,7 +199,7 @@ pub fn decode_encoding_e(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         mz: Vec::with_capacity(n),
         intensity: Vec::with_capacity(n),
     };
-    for rec in scan_bytes.chunks_exact(12) {
+    for rec in scan_bytes.as_chunks::<12>().0 {
         let word = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
         let mantissa = word & 0x001f_ffff;
         if mantissa == 0 {

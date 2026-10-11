@@ -114,13 +114,18 @@ One section per MS function. Format:
 `Function Parameters - Function N - <TYPE>`
 
 where `TYPE` is one of:
-- `TOF MS FUNCTION` - standard MS1 survey scan
+- `TOF MS FUNCTION` - MS1 scan; some MSe acquisitions also label their
+  high-energy function this way (see "MS level" below)
 - `TOF PARENT FUNCTION` - MSe/HDMSe low- or high-energy scan (broadband,
   non-selective fragmentation - `[INCLUDE]`'s `Precursor Selection` reads
   `Everything`, so there is no discrete precursor to report; see
   `docs/format/00-overview.md`'s Function Concept table)
-- `TOF MSMS FUNCTION` - targeted MS/MS (fixed precursor, classic DDA-style
-  acquisition). Carries a `Set Mass` field (see below).
+- `TOF MSMS FUNCTION` - MS/MS. Targeted (one fixed precursor) or
+  data-dependent. Carries a `Set Mass` field (see below).
+- `TOF SURVEY FUNCTION`, `MOBILITY SURVEY FUNCTION`, `MOBILITY FAST DDA
+  FUNCTION` - data-dependent (DDA) acquisition: function 1 is the MS1
+  survey, the following functions are the MS/MS slots, each with
+  `Set Mass 0.0`
 - `TOF DAUGHTER FUNCTION` - DDA fragment scan, same `Set Mass` semantics as
   `TOF MSMS FUNCTION`
 - `TOF PRODUCT FUNCTION` - MS/MS fragment scan
@@ -141,11 +146,18 @@ Key per-function fields:
 | `ADC Sample Frequency (GHz)` | GHz | ADC sampling rate |
 | `ADC Pusher Frequency (µs)` | µs | Per-function pusher cycle override (if set) |
 | `Calibration` | - | Calibration mode: `Dynamic 2` = lock-mass, `Static` = fixed |
-| `Set Mass` | Da | Targeted precursor m/z. Only present on `TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION` sections - confirmed against real targeted-MS/MS corpus samples (Sigilweaver/OpenWRaw#13), absent from every `TOF PARENT FUNCTION` (MSe) section checked |
+| `Set Mass` | Da | Precursor m/z of an MS/MS function. Present on MS/MS sections (`TOF MSMS`, `TOF DAUGHTER`, and the DDA MS/MS slots labelled `TOF SURVEY` / `MOBILITY SURVEY`); absent from every `TOF PARENT FUNCTION` (MSe) section. DDA slots store `0.0`, which the parser reports as absent (`set_mass_da = None`), never as m/z 0. In DDA bundles a non-zero value is a method default, not each scan's precursor (PXD001123, PXD010569: one value per function while the scans' precursors differ); the per-scan precursor is the `Set Mass` channel of [`_FUNCnnn.STS`](07-func-sts.md) |
+| `... Collision Energy Ramp Start` / `... Ramp End` | eV | Collision-energy ramp of the function, e.g. `Transfer Collision Energy Ramp Start (eV)  27.0` |
+| `... Collision Energy Low` / `... High` | eV | Same, other spelling, e.g. `Transfer MS Collision Energy Low (eV)  25.0` |
+| `... Collision Energy (eV)  <a> (Ramping to <b>)` | eV | Same, on one line, e.g. `Using Auto Transfer MS Collision Energy (eV)  15.0000 (Ramping to 25.0000)` |
+
+The three ramp spellings are parsed into
+`ExternFunction::collision_energy_ramp_ev = Some((start, end))` when
+`end > start` (a `0.0` to `0.0` ramp is no ramp).
 
 No charge state or isolation-width field has been found on any function
-type in any corpus sample; `Set Mass` (target m/z) is the only precursor
-field `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
+type in any corpus sample; `Set Mass` is the only precursor field
+`_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
 functions (both targeted and MSe) comes from a separate file - see
 [07 - _FUNCnnn.STS](07-func-sts.md)'s "Collision Energy" channel.
 
@@ -154,6 +166,34 @@ functions (both targeted and MSe) comes from a separate file - see
 established whether the two pairs are aliases or bounds with different
 meanings, and `TOF MSMS FUNCTION` sections use an `MSMS End Mass` key
 instead of `End Mass` (Sigilweaver/OpenWRaw#24).
+
+## MS Level
+
+`Reader::ms_level` assigns each function an MS level from the section
+label, the section's collision-energy ramp and the function's position:
+
+1. `REFERENCE`: MS1.
+2. `TOF MSMS`, `TOF DAUGHTER`: MS2.
+3. `TOF MS`: MS2 only when the section records a collision-energy ramp and
+   another non-lock-mass `TOF MS` function of the same bundle records
+   none (the low-energy half of an MSe pair). Otherwise MS1.
+4. Any other label (`TOF PARENT`, `TOF SURVEY`, `MOBILITY SURVEY`, ...):
+   function 1, or the only function, is MS1; later functions are MS2.
+
+Rule 3 is deliberately narrow. A ramp on a `TOF MS` function with no
+unramped partner, or a pair of `TOF MS` functions with no collision-energy
+fields at all, stays MS1, because the file then gives no unambiguous sign
+of which function fragments. In the public corpus rule 3 applies to 3
+bundles: PXD009047 (function 2, `Transfer Collision Energy Ramp Start/End`
+27 to 50 eV) and both PXD078353 bundles (function 2, `15.0000 (Ramping to
+25.0000)`). The 45 Vion bundles exported by UNIFI (PXD081045) have two
+`TOF MS` functions and no collision-energy field in `_extern.inf` or any
+`_FUNCnnn.STS`, so both are reported as MS1 even though function 2 is
+probably the high-energy function. PXD066594 has one `TOF MS` function
+with a fixed 30 eV transfer collision energy and stays MS1.
+
+The two functions of an MSe pair have byte-identical `_FUNCTNS.INF`
+records (PXD009047, PXD078353, PXD081045), so that file does not help.
 
 ## Version Line
 
@@ -185,4 +225,6 @@ in the corpus (Sigilweaver/OpenWRaw#13); Function 1's `Set Mass` reads
 ## Reference Sources
 
 - Corpus files: all `_extern.inf` files in PXD058812, PXD066594, PXD068881, PXD075602, PXD035818
-- Used by: `mzml::precursor_info_for` (`target_mz`). `ExternInf::a_us()` (flight-time constant from `Lteff`/`Veff`) is parsed but not used by any DAT decoder, since every encoding stores m/z directly
+- Used by: `Reader::ms_level` (labels, collision-energy ramps) and
+  `Reader::precursor_mz` (`Set Mass`, when the scan's STS file has no
+  non-zero `Set Mass`). `ExternInf::a_us()` (flight-time constant from `Lteff`/`Veff`) is parsed but not used by any DAT decoder, since every encoding stores m/z directly

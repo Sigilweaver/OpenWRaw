@@ -1,4 +1,4 @@
-# _CHROnnnn.DAT
+# _CHROnnn.DAT
 
 Binary chromatogram data file. One file per recorded channel (e.g.
 `_CHRO001.DAT`, `_CHRO002.DAT`). Contains a time-series of (RT, value)

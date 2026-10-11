@@ -151,7 +151,8 @@ def test_canonical_records_and_decoded_metadata(raw_bundle):
     assert len(record["mz"]) == len(record["intensity"])
     assert record["native_id"]
     scan_params = r.scan_parameters(first.index, 0)
-    assert {"collision_energy_ev", "etd_fragmentation_mode"} <= scan_params.keys()
+    assert {"collision_energy_ev", "etd_fragmentation_mode", "precursor_mz"} <= scan_params.keys()
+    assert record["ms_level"] == r.ms_level(first.index)
     channels = r.scan_channels(first.index, 0)
     assert isinstance(channels, dict)
     assert all(isinstance(row["name"], str) for row in r.channel_descriptors(first.index))

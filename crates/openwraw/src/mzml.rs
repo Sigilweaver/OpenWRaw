@@ -11,13 +11,17 @@
 //! * Native ID format mirrors the de-facto Waters convention used by
 //!   ProteoWizard / Wiff2: `function=F process=0 scan=S` (1-based S).
 //! * Lock-mass / reference functions are skipped.
+//! * A scan or chromatogram channel that cannot be decoded is yielded as an
+//!   `Err` in its place; nothing is dropped silently. The writer stops at
+//!   the first such error unless the caller opts into
+//!   [`msc::RecordErrorPolicy::Skip`].
 
 use std::io::Write;
 use std::path::Path;
 
 use openmassspec_core as msc;
 
-use crate::raw::chroms::{read_chro_dat, ChromsInf};
+use crate::raw::chroms::{read_chro_dat, ChromChannel, ChromsInf};
 use crate::reader::{find_file, DecodedScan, Reader};
 
 const SOFTWARE_NAME: &str = "openwraw";
@@ -70,7 +74,7 @@ fn native_id_format_cv() -> msc::CvTerm {
 /// correct permanent answer here unless real sample files surface.
 fn instrument_cv(name: &str) -> msc::CvTerm {
     let up = name.to_ascii_uppercase();
-    let known: &[(&str, &str, &str)] = &[
+    let known: &[(&str, &'static str, &'static str)] = &[
         ("SYNAPT G2-SI", "MS:1002726", "SYNAPT G2-Si"),
         ("XEVO G2-XS QTOF", "MS:1003252", "Xevo G2-XS QTof"),
         ("XEVO-G2XSQTOF", "MS:1003252", "Xevo G2-XS QTof"),
@@ -80,7 +84,7 @@ fn instrument_cv(name: &str) -> msc::CvTerm {
     ];
     for (prefix, acc, term_name) in known {
         if up.starts_with(prefix) {
-            return msc::CvTerm::new(acc, *term_name);
+            return msc::CvTerm::new(*acc, *term_name);
         }
     }
     msc::CvTerm::new("MS:1000126", "Waters instrument model")
@@ -214,92 +218,62 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
         .as_deref()
         .zip(reader.header.acquired_time.as_deref())
         .and_then(|(d, t)| parse_acquired_datetime(d, t));
-    msc::RunMetadata {
-        extra,
-        source_file_name: reader.bundle_name.clone(),
-        source_file_format: source_file_format_cv(),
-        native_id_format: native_id_format_cv(),
-        instrument: instrument_cv(&instrument_name),
-        instrument_serial_number: None,
-        software_name: SOFTWARE_NAME.into(),
-        software_version: SOFTWARE_VERSION.into(),
-        acquisition_software_name: None,
-        acquisition_software_version: None,
-        start_timestamp,
-        // Ion mobility is not decoded, so no spectrum carries a mobility array.
-        mobility_array_kind: None,
-        analyzers: Vec::new(),
-    }
-}
-
-fn ms_level_for_function(reader: &Reader, function_index: u32) -> u32 {
-    // Prefer unambiguous mode labels from the _extern.inf section
-    // header; for `TOF PARENT` (which Waters uses for both low-energy
-    // MS1 and high-energy fragment scans in MSe / HDMSe) and for
-    // unknown labels, fall back to the function-index heuristic.
-    use crate::raw::extern_inf::FunctionMode;
-    if let Some(f) = reader.extern_inf.functions.get(&function_index) {
-        match f.mode {
-            FunctionMode::Ms | FunctionMode::Reference => return 1,
-            FunctionMode::Msms | FunctionMode::Daughter => return 2,
-            FunctionMode::MseParent | FunctionMode::Unknown => {}
-        }
-    }
-    if function_index == 1 || reader.functions.len() == 1 {
-        1
-    } else {
-        2
-    }
+    // Ion mobility is not decoded, so no spectrum carries a mobility array
+    // and no mobility array kind is set.
+    msc::RunMetadata::new(
+        reader.bundle_name.clone(),
+        source_file_format_cv(),
+        native_id_format_cv(),
+        instrument_cv(&instrument_name),
+        SOFTWARE_NAME,
+        SOFTWARE_VERSION,
+    )
+    .with_start_timestamp(start_timestamp)
+    .with_extra_map(extra)
 }
 
 /// Build a spectrum's `PrecursorInfo`, or `None` for MS1 (and any other
-/// function this reader has no precursor signal for at all).
+/// spectrum this reader has no precursor information for at all).
 ///
-/// Two independent, corpus-verified sources feed this (Sigilweaver/OpenWRaw#8,
-/// #13):
-/// * `target_mz` from `_extern.inf`'s `Set Mass` field, present only on
-///   `TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION` sections (real targeted
-///   MS/MS - a fixed precursor list or SRM-like acquisition). `TOF PARENT
-///   FUNCTION` (MSe/HDMSe) sections never have this field: broadband
-///   `Precursor Selection: Everything` fragmentation has no discrete
-///   precursor to set, so `None` here is correct, not a decoding gap.
+/// Two independent sources feed this:
+/// * the precursor m/z from [`Reader::precursor_mz`] (the scan's
+///   `_FUNCnnn.STS` "Set Mass" channel for data-dependent MS/MS, else the
+///   function's `_extern.inf` `Set Mass` for targeted MS/MS). It is written
+///   as both the isolation window target m/z and the selected ion m/z. MSe
+///   and HDMSe functions (broadband fragmentation, `Precursor Selection:
+///   Everything`) have no discrete precursor, and a stored set mass of 0
+///   is no precursor, so neither is written for them.
 /// * `collision_energy` from `_FUNCnnn.STS`'s per-scan "Collision Energy"
-///   channel, which is independent of `target_mz` and is populated for MSe
-///   functions too (Waters records a real collision energy for the
-///   high-energy MSe scan even though it has no discrete precursor).
+///   channel, which is independent of the precursor m/z and is populated
+///   for MSe functions too.
 ///
 /// Returns `None` (rather than `Some` with every field `None`) when neither
 /// source has anything to report, so a spectrum with genuinely no precursor
 /// information has no `<precursor>` element.
 ///
 /// No charge state or isolation width field has been found in either file
-/// for any corpus sample (targeted or MSe); this is a real gap in what
-/// `_extern.inf`/`_FUNCnnn.STS` expose, not an oversight in this function.
+/// for any corpus sample; this is a gap in what `_extern.inf`/`_FUNCnnn.STS`
+/// expose, not an oversight in this function.
 fn precursor_info_for(
-    reader: &Reader,
-    function_index: u32,
     ms_level: u32,
+    precursor_mz: Option<f64>,
     collision_energy_ev: Option<f64>,
     etd_fragmentation_mode: Option<f64>,
 ) -> Option<msc::PrecursorInfo> {
     if ms_level < 2 {
         return None;
     }
-    let target_mz = reader
-        .extern_inf
-        .functions
-        .get(&function_index)
-        .and_then(|f| f.set_mass_da);
-    if target_mz.is_none() && collision_energy_ev.is_none() {
+    if precursor_mz.is_none() && collision_energy_ev.is_none() {
         return None;
     }
-    Some(msc::PrecursorInfo {
-        target_mz,
-        collision_energy: collision_energy_ev,
-        ce_is_nce: false,
-        activation: activation_for(etd_fragmentation_mode),
-        ..Default::default()
-    })
+    Some(
+        msc::PrecursorInfo::default()
+            .with_target_mz(precursor_mz)
+            .with_selected_mz(precursor_mz)
+            .with_collision_energy(collision_energy_ev)
+            .with_ce_is_nce(false)
+            .with_activation(activation_for(etd_fragmentation_mode)),
+    )
 }
 
 /// Map `_FUNCnnn.STS`'s "ETD Fragmentation Mode" channel (seq 121) to an
@@ -343,28 +317,28 @@ fn chromatogram_type_for_units(units: &str) -> Option<msc::CvTerm> {
     None
 }
 
-/// Decode every mappable instrument channel in `_CHROMS.INF`/`_CHROnnnn.DAT`
-/// into `openmassspec_core` chromatogram records.
+/// Decode every mappable instrument channel in `_CHROMS.INF`/`_CHROnnn.DAT`
+/// into `openmassspec_core` chromatogram records, one item per mappable
+/// channel.
 ///
-/// Returns an empty vec (not an error) when `_CHROMS.INF` is absent, per its
-/// own docs: direct-infusion / pure-MS bundles don't record LC channels.
-/// A `_CHROMS.INF`, channel, or companion `.DAT` file that cannot be read
-/// is logged at warn level and skipped rather than aborting the whole run,
-/// matching `iter_spectra`'s skip-and-log contract.
-fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
+/// Returns no items when `_CHROMS.INF` is absent: direct-infusion and
+/// pure-MS bundles do not record LC channels. Channels whose units have no
+/// PSI-MS chromatogram type are left out (see
+/// [`chromatogram_type_for_units`]). A `_CHROMS.INF` that cannot be read
+/// yields a single `Err`; a mappable channel whose `_CHROnnn.DAT` is missing
+/// or unreadable yields an `Err` in that channel's place.
+fn chromatogram_records_for(dir: &Path) -> Vec<crate::Result<msc::ChromatogramRecord>> {
     let inf_path = match find_file(dir, "_CHROMS.INF") {
         Ok(Some(path)) => path,
         Ok(None) => return Vec::new(),
-        Err(e) => {
-            log::warn!("{}: cannot look up _CHROMS.INF: {e}", dir.display());
-            return Vec::new();
-        }
+        Err(e) => return vec![Err(e)],
     };
     let inf = match ChromsInf::from_path(&inf_path) {
         Ok(inf) => inf,
         Err(e) => {
-            log::warn!("{}: skipping chromatograms: {e}", inf_path.display());
-            return Vec::new();
+            return vec![Err(
+                e.with_context(format!("reading {}", inf_path.display()))
+            )]
         }
     };
 
@@ -373,55 +347,41 @@ fn chromatogram_records_for(dir: &Path) -> Vec<msc::ChromatogramRecord> {
         let Some(chromatogram_type) = chromatogram_type_for_units(&ch.units) else {
             continue;
         };
-        let chro_num = inf.chro_number_for_channel(ch.index);
-        let dat_name = format!("_CHRO{chro_num:03}.DAT");
-        let dat_path = match find_file(dir, &dat_name) {
-            Ok(Some(path)) => path,
-            Ok(None) => {
-                log::warn!(
-                    "{}: channel {} ({}): {dat_name} not found, skipping",
-                    dir.display(),
-                    ch.index,
-                    ch.name
-                );
-                continue;
-            }
-            Err(e) => {
-                log::warn!(
-                    "{}: channel {} ({}): cannot look up {dat_name}: {e}",
-                    dir.display(),
-                    ch.index,
-                    ch.name
-                );
-                continue;
-            }
-        };
-        let points = match read_chro_dat(&dat_path) {
-            Ok(points) => points,
-            Err(e) => {
-                log::warn!(
-                    "{}: channel {} ({}) skipped: {e}",
-                    dat_path.display(),
-                    ch.index,
-                    ch.name
-                );
-                continue;
-            }
-        };
-        let scale = ch.scale_f as f32;
-        let time_sec = points.iter().map(|p| p.rt_min * 60.0).collect();
-        let intensity = points.iter().map(|p| p.value * scale).collect();
-        out.push(msc::ChromatogramRecord {
-            index: out.len(),
-            id: ch.name.clone(),
-            chromatogram_type: Some(chromatogram_type),
-            precursor_mz: None,
-            product_mz: None,
-            time_sec,
-            intensity,
-        });
+        let index = out.len();
+        out.push(chromatogram_record(dir, &inf, ch, index, chromatogram_type));
     }
     out
+}
+
+/// Read one mappable `_CHROMS.INF` channel from its `_CHROnnn.DAT` file.
+fn chromatogram_record(
+    dir: &Path,
+    inf: &ChromsInf,
+    ch: &ChromChannel,
+    index: usize,
+    chromatogram_type: msc::CvTerm,
+) -> crate::Result<msc::ChromatogramRecord> {
+    let chro_num = inf.chro_number_for_channel(ch.index);
+    let dat_name = format!("_CHRO{chro_num:03}.DAT");
+    let context = || {
+        format!(
+            "{}: chromatogram channel {} ({})",
+            dir.display(),
+            ch.index,
+            ch.name
+        )
+    };
+    let dat_path = find_file(dir, &dat_name)
+        .and_then(|path| path.ok_or_else(|| crate::Error::Parse(format!("{dat_name} not found"))))
+        .map_err(|e| e.with_context(context()))?;
+    let points = read_chro_dat(&dat_path).map_err(|e| e.with_context(context()))?;
+    let scale = ch.scale_f as f32;
+    let time_sec = points.iter().map(|p| p.rt_min * 60.0).collect();
+    let intensity = points.iter().map(|p| p.value * scale).collect();
+    Ok(
+        msc::ChromatogramRecord::new(index, ch.name.clone(), time_sec, intensity)
+            .with_chromatogram_type(chromatogram_type),
+    )
 }
 
 /// Collect every decoded scan in a bundle into `openmassspec_core` records.
@@ -454,14 +414,14 @@ pub fn record_from_scan(
         spectrum,
         collision_energy_ev,
         etd_fragmentation_mode,
+        precursor_mz,
     } = scan;
     let (mz, intensity) = (spectrum.mz, spectrum.intensity);
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
-    let ms_level = ms_level_for_function(reader, function_index);
+    let ms_level = reader.ms_level(function_index);
     let precursor = precursor_info_for(
-        reader,
-        function_index,
         ms_level,
+        precursor_mz,
         collision_energy_ev,
         etd_fragmentation_mode,
     );
@@ -491,31 +451,26 @@ pub fn record_from_scan(
             }
         }
     }
-    msc::SpectrumRecord {
-        extra,
-        acquisition_event_id: None,
-        index: (scan_counter as usize).saturating_sub(1),
-        scan_number: scan_counter,
-        native_id: native_id_for(function_index, scan_idx),
-        ms_level,
-        polarity: polarity_for(reader, function_index),
-        scan_mode,
-        analyzer: Some(msc::Analyzer::TOFMS),
-        filter: None,
-        retention_time_sec: retention_time_min as f64 * 60.0,
-        total_ion_current: Some(tic),
-        base_peak_mz: bp_mz,
-        base_peak_intensity: bp_int,
-        low_mz,
-        high_mz,
-        ion_injection_time_ms: None,
-        inv_mobility: None,
-        faims_cv: None, // Waters instruments have no FAIMS interface.
-        precursor,
-        mz,
-        intensity,
-        inv_mobility_per_peak: None,
-    }
+    // Waters instruments have no FAIMS interface, and ion mobility is not
+    // decoded, so the mobility and FAIMS fields stay `None`.
+    msc::SpectrumRecord::new(
+        (scan_counter as usize).saturating_sub(1),
+        scan_counter,
+        native_id_for(function_index, scan_idx),
+    )
+    .with_ms_level(ms_level)
+    .with_polarity(polarity_for(reader, function_index))
+    .with_scan_mode(scan_mode)
+    .with_analyzer(msc::Analyzer::TOFMS)
+    .with_retention_time_sec(retention_time_min as f64 * 60.0)
+    .with_total_ion_current(tic)
+    .with_base_peak_mz(bp_mz)
+    .with_base_peak_intensity(bp_int)
+    .with_low_mz(low_mz)
+    .with_high_mz(high_mz)
+    .with_precursor(precursor)
+    .with_peaks(mz, intensity)
+    .with_extra_map(extra)
 }
 
 fn summarize_arrays(
@@ -548,9 +503,9 @@ fn summarize_arrays(
 
 /// `SpectrumSource` adapter that owns a [`Reader`]. Spectra are decoded
 /// scan-by-scan as `iter_spectra` is driven; nothing is buffered beyond the
-/// scan currently being yielded. A scan that fails to decode is skipped
-/// (per [`msc::SpectrumSource::iter_spectra`]'s contract) rather than
-/// aborting the whole run.
+/// scan currently being yielded. A scan that fails to decode is yielded as
+/// an `Err` in its place, wrapped in [`msc::Error::Vendor`]; the next item
+/// is the next scan.
 pub struct WatersSource {
     reader: Reader,
 }
@@ -577,59 +532,61 @@ impl msc::SpectrumSource for WatersSource {
     fn run_metadata(&self) -> msc::RunMetadata {
         run_metadata_for(&self.reader)
     }
-    /// Scans that fail to decode are skipped. Each failure is logged at warn
-    /// level, and the total is logged once the iterator is exhausted.
-    fn iter_spectra<'s>(&'s mut self) -> Box<dyn Iterator<Item = msc::SpectrumRecord> + 's> {
+    /// Yields one item per non-lock-mass scan. A scan that fails to decode
+    /// is an `Err` carrying the [`crate::Error`] as
+    /// [`msc::Error::Vendor`].
+    fn iter_spectra<'s>(&'s mut self) -> msc::SpectrumIter<'s> {
         let reader = &self.reader;
         let mut scan_counter: u32 = 0;
-        let skipped = std::rc::Rc::new(std::cell::Cell::new(0usize));
-        let skipped_in_loop = std::rc::Rc::clone(&skipped);
-        let records = reader.iter_spectra().filter_map(move |decoded| {
+        Box::new(reader.iter_spectra().map(move |decoded| {
             scan_counter += 1;
-            match decoded {
-                Ok(scan) => Some(record_from_scan(reader, scan_counter, scan)),
-                Err(e) => {
-                    skipped_in_loop.set(skipped_in_loop.get() + 1);
-                    log::warn!("skipping scan {scan_counter}: {e}");
-                    None
-                }
-            }
-        });
-        let summary = std::iter::once_with(move || {
-            if skipped.get() > 0 {
-                log::warn!(
-                    "{}: {} scan(s) failed to decode and were skipped",
-                    reader.bundle_name,
-                    skipped.get()
-                );
-            }
-            None
-        })
-        .flatten();
-        Box::new(records.chain(summary))
+            decoded
+                .map(|scan| record_from_scan(reader, scan_counter, scan))
+                .map_err(msc::Error::from)
+        }))
     }
     fn spectrum_count_hint(&self) -> Option<usize> {
         Some(self.reader.total_scan_count())
     }
-    fn iter_chromatograms<'s>(
-        &'s mut self,
-    ) -> Box<dyn Iterator<Item = msc::ChromatogramRecord> + 's> {
-        Box::new(chromatogram_records_for(&self.reader.dir).into_iter())
+    /// Yields one item per `_CHROMS.INF` channel with a PSI-MS chromatogram
+    /// type. A channel that cannot be read is an `Err` in its place.
+    fn iter_chromatograms<'s>(&'s mut self) -> msc::ChromatogramIter<'s> {
+        Box::new(
+            chromatogram_records_for(&self.reader.dir)
+                .into_iter()
+                .map(|rec| rec.map_err(msc::Error::from)),
+        )
     }
 }
 
 /// Convenience wrapper: open `dir`, decode every scan, emit mzML.
-pub fn write_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crate::Result<()> {
+///
+/// # Errors
+///
+/// Fails when the bundle cannot be opened, or with [`crate::Error::Core`]
+/// at the first scan or chromatogram that cannot be decoded, or on an I/O
+/// error from `out`. `out` then holds a truncated document. To skip
+/// unreadable records instead, drive [`WatersSource`] through
+/// [`msc::write_mzml_with_options`] with [`msc::RecordErrorPolicy::Skip`].
+pub fn write_mzml<P: AsRef<Path>, W: Write>(
+    dir: P,
+    out: &mut W,
+) -> crate::Result<msc::WriteSummary> {
     let mut src = WatersSource::open(dir)?;
-    msc::write_mzml(&mut src, out).map_err(crate::Error::Io)?;
-    Ok(())
+    Ok(msc::write_mzml(&mut src, out)?)
 }
 
 /// Indexed-mzML equivalent of [`write_mzml`].
-pub fn write_indexed_mzml<P: AsRef<Path>, W: Write>(dir: P, out: &mut W) -> crate::Result<()> {
+///
+/// # Errors
+///
+/// As for [`write_mzml`].
+pub fn write_indexed_mzml<P: AsRef<Path>, W: Write>(
+    dir: P,
+    out: &mut W,
+) -> crate::Result<msc::WriteSummary> {
     let mut src = WatersSource::open(dir)?;
-    msc::write_indexed_mzml(&mut src, out).map_err(crate::Error::Io)?;
-    Ok(())
+    Ok(msc::write_indexed_mzml(&mut src, out)?)
 }
 
 #[cfg(test)]
@@ -752,11 +709,14 @@ mod tests {
             let mz = precursor
                 .target_mz
                 .unwrap_or_else(|| panic!("scan {} missing target_mz", rec.scan_number));
+            // The per-scan STS "Set Mass" (884.92, f32) is preferred over the
+            // rounded `_extern.inf` value (884.9).
             assert!(
-                (mz - 884.9).abs() < 1e-6,
-                "scan {}: target_mz = {mz}, expected 884.9",
+                (mz - 884.92).abs() < 1e-3,
+                "scan {}: target_mz = {mz}, expected 884.92",
                 rec.scan_number
             );
+            assert_eq!(precursor.selected_mz, Some(mz));
             assert!(!precursor.ce_is_nce);
         }
     }
@@ -828,8 +788,233 @@ mod tests {
         }
     }
 
+    fn reader_with_extern(n_functions: usize, extern_inf: &str) -> Reader {
+        let mut reader = reader_with_functions(&vec![(Encoding::D, 0); n_functions]);
+        reader.extern_inf = extern_inf.parse().unwrap();
+        reader
+    }
+
+    fn scan_with_precursor(precursor_mz: Option<f64>) -> DecodedScan {
+        DecodedScan {
+            function_index: 2,
+            scan_idx: 0,
+            retention_time_min: 0.0,
+            spectrum: Default::default(),
+            collision_energy_ev: None,
+            etd_fragmentation_mode: None,
+            precursor_mz,
+        }
+    }
+
     #[test]
-    fn source_skips_scans_that_fail_to_decode() {
+    fn mse_high_energy_tof_ms_function_is_ms2() {
+        // PXD009047 layout: two `TOF MS FUNCTION` sections, the second with
+        // a transfer collision-energy ramp, plus a lock-mass reference.
+        let reader = reader_with_extern(
+            3,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 1 - TOF MS FUNCTION\n\
+             Using Auto Transfer Collision Energy (eV)\t0.000000\n\
+             Function Parameters - Function 2 - TOF MS FUNCTION\n\
+             Transfer Collision Energy Ramp Start (eV)\t27.0\n\
+             Transfer Collision Energy Ramp End (eV)\t50.0\n\
+             Function Parameters - Function 3 - REFERENCE\n",
+        );
+        assert_eq!(reader.ms_level(1), 1);
+        assert_eq!(reader.ms_level(2), 2);
+        assert_eq!(reader.ms_level(3), 1);
+    }
+
+    #[test]
+    fn ramped_tof_ms_function_without_low_energy_partner_stays_ms1() {
+        // A lone ramped `TOF MS` function is not evidence of MSe.
+        let reader = reader_with_extern(
+            1,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 1 - TOF MS FUNCTION\n\
+             Transfer Collision Energy Ramp Start (eV)\t27.0\n\
+             Transfer Collision Energy Ramp End (eV)\t50.0\n",
+        );
+        assert_eq!(reader.ms_level(1), 1);
+    }
+
+    #[test]
+    fn unlabelled_energy_tof_ms_pair_stays_ms1() {
+        // Vion/UNIFI layout: two `TOF MS` functions, no collision energy.
+        let reader = reader_with_extern(
+            2,
+            "Lteff 2200\nVeff 5227\n\
+             Function Parameters - Function 1 - TOF MS FUNCTION\n\
+             Resolution\t30000.0\n\
+             Function Parameters - Function 2 - TOF MS FUNCTION\n\
+             Resolution\t30000.0\n",
+        );
+        assert_eq!(reader.ms_level(1), 1);
+        assert_eq!(reader.ms_level(2), 1);
+    }
+
+    #[test]
+    fn zero_set_mass_gives_no_precursor_mz() {
+        // DDA MS/MS sections store `Set Mass 0.0`.
+        let reader = reader_with_extern(
+            2,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 1 - TOF SURVEY FUNCTION\n\
+             Function Parameters - Function 2 - TOF SURVEY FUNCTION\n\
+             Set Mass\t0.0\n",
+        );
+        assert_eq!(reader.ms_level(2), 2);
+        assert_eq!(reader.precursor_mz(2, 0), None);
+        let rec = record_from_scan(&reader, 1, scan_with_precursor(None));
+        assert_eq!(rec.ms_level, 2);
+        assert!(rec.precursor.is_none(), "no m/z and no collision energy");
+    }
+
+    #[test]
+    fn precursor_mz_is_written_as_target_and_selected_ion() {
+        let reader = reader_with_extern(2, "Lteff 1800\nVeff 7200");
+        let rec = record_from_scan(&reader, 1, scan_with_precursor(Some(823.7629)));
+        let precursor = rec.precursor.expect("precursor");
+        assert_eq!(precursor.target_mz, Some(823.7629));
+        assert_eq!(precursor.selected_mz, Some(823.7629));
+    }
+
+    /// `_auto.txt` precursor log: one `m/z,time (s)` line per selected
+    /// precursor.
+    fn auto_txt_precursors(dir: &Path) -> Vec<f64> {
+        let text = std::fs::read_to_string(dir.join("_auto.txt")).unwrap();
+        text.lines()
+            .filter_map(|l| l.split(',').next()?.trim().parse().ok())
+            .collect()
+    }
+
+    // DDA bundle whose MS/MS sections store `Set Mass 0.0`. The per-scan
+    // precursor is in the STS "Set Mass" channel; every precursor in the
+    // bundle's `_auto.txt` log is found there to 0.5 mDa.
+    #[test]
+    fn corpus_pxd041695_dda_precursor_from_sts() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD041695/JLG-1D-ISY-C18_Q0764.raw"]) else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        let mut ms2 = 0usize;
+        let mut sts_values = Vec::new();
+        for f in reader.functions.iter().filter(|f| !f.info.is_lock_mass()) {
+            for i in 0..f.scan_count() {
+                let mz = reader.precursor_mz(f.index, i);
+                if reader.ms_level(f.index) == 2 {
+                    ms2 += 1;
+                    let mz = mz.unwrap_or_else(|| panic!("F{} scan {i}: no precursor", f.index));
+                    assert!(mz > 0.0);
+                    sts_values.push(mz);
+                } else {
+                    assert_eq!(mz, None, "MS1 F{} scan {i}", f.index);
+                }
+            }
+        }
+        assert_eq!(ms2, 2987);
+        // First MS/MS scan of function 2: first `_auto.txt` entry.
+        assert!((reader.precursor_mz(2, 0).unwrap() - 823.7629).abs() < 5e-4);
+        let logged = auto_txt_precursors(&dir);
+        assert_eq!(logged.len(), 410);
+        for mz in logged {
+            assert!(
+                sts_values.iter().any(|v| (v - mz).abs() < 5e-4),
+                "_auto.txt precursor {mz} not in STS Set Mass"
+            );
+        }
+        // Decoded records carry it as target and selected ion m/z.
+        let rec = record_from_scan(&reader, 1, reader.decode_scan(2, 0).unwrap());
+        let p = rec.precursor.expect("precursor");
+        assert_eq!(p.target_mz, p.selected_mz);
+        assert!((p.target_mz.unwrap() - 823.7629).abs() < 5e-4);
+    }
+
+    // DDA bundle whose `TOF MSMS FUNCTION` sections store one fixed
+    // `Set Mass` per function (1388.0 for function 2) while the scans'
+    // precursors differ; the per-scan STS value wins.
+    #[test]
+    fn corpus_pxd010569_sts_precursor_overrides_extern_set_mass() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD010569/20161025_AV_Dario_Banda_10.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        let ext = reader.extern_inf.functions[&2].set_mass_da;
+        assert_eq!(ext, Some(1388.0));
+        let n = reader
+            .functions
+            .iter()
+            .find(|f| f.index == 2)
+            .unwrap()
+            .scan_count();
+        let distinct: std::collections::BTreeSet<i64> = (0..n)
+            .map(|i| (reader.precursor_mz(2, i).unwrap() * 1e4) as i64)
+            .collect();
+        assert!(
+            distinct.len() > 100,
+            "{} distinct precursors",
+            distinct.len()
+        );
+        let logged = auto_txt_precursors(&dir);
+        let first = reader.precursor_mz(2, 0).unwrap();
+        assert!(logged.iter().any(|mz| (mz - first).abs() < 5e-4));
+    }
+
+    // PXD009047 (SYNAPT G2 HDMS): function 2 is labelled `TOF MS FUNCTION`
+    // but its section sets a 27 to 50 eV transfer collision-energy ramp; it
+    // is the high-energy MSe function.
+    #[test]
+    fn corpus_pxd009047_mse_high_energy_function_is_ms2() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD009047/110810_UCA114_CD_JN018_02.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        assert_eq!(
+            reader.extern_inf.functions[&2].collision_energy_ramp_ev,
+            Some((27.0, 50.0))
+        );
+        assert_eq!(reader.ms_level(1), 1);
+        assert_eq!(reader.ms_level(2), 2);
+        let rec = record_from_scan(&reader, 1, reader.decode_scan(2, 0).unwrap());
+        assert_eq!(rec.ms_level, 2);
+        assert!(rec.precursor.as_ref().is_none_or(|p| p.target_mz.is_none()));
+    }
+
+    // PXD078353: function 2 records `15.0000 (Ramping to 25.0000)`.
+    #[test]
+    fn corpus_pxd078353_mse_high_energy_function_is_ms2() {
+        let Some(dir) =
+            crate::test_corpus::bundle(&["PXD078353/26-04-24_Set2_MUT_G260D_mapp1.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        assert_eq!(
+            reader.extern_inf.functions[&2].collision_energy_ramp_ev,
+            Some((15.0, 25.0))
+        );
+        assert_eq!(reader.ms_level(1), 1);
+        assert_eq!(reader.ms_level(2), 2);
+    }
+
+    // Known issue: UNIFI-exported Vion bundles record no collision energy,
+    // so both `TOF MS` functions are reported as MS1.
+    #[test]
+    fn corpus_pxd081045_vion_functions_stay_ms1() {
+        let Some(dir) =
+            crate::test_corpus::bundle(&["PXD081045/2D-Gele_Lonafarnib_Run2/Blank.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        assert_eq!(reader.ms_level(1), 1);
+        assert_eq!(reader.ms_level(2), 1);
+    }
+
+    #[test]
+    fn source_yields_err_for_scans_that_fail_to_decode() {
         use crate::raw::index::{ScanIndex, ScanIndexB};
         use msc::SpectrumSource;
         let mut reader = reader_with_functions(&[(Encoding::D, 0)]);
@@ -840,7 +1025,11 @@ mod tests {
         }]);
         assert!(reader.decode_scan(1, 0).is_err());
         let mut source = WatersSource::new(reader);
-        assert_eq!(source.iter_spectra().count(), 0);
+        let items: Vec<_> = source.iter_spectra().collect();
+        assert_eq!(items.len(), 1, "the failed scan keeps its place");
+        let err = items.into_iter().next().unwrap().unwrap_err();
+        assert!(matches!(err, msc::Error::Vendor(_)), "{err}");
+        assert!(err.to_string().contains("past the end"), "{err}");
     }
 
     #[test]
@@ -854,6 +1043,7 @@ mod tests {
                 spectrum: Default::default(),
                 collision_energy_ev: None,
                 etd_fragmentation_mode: None,
+                precursor_mz: None,
             };
             record_from_scan(&reader, 1, scan).scan_mode
         };
@@ -948,7 +1138,7 @@ mod tests {
 
         let records = chromatogram_records_for(&dir);
         assert_eq!(records.len(), 1, "the % channel should be skipped");
-        let rec = &records[0];
+        let rec = records[0].as_ref().unwrap();
         assert_eq!(rec.id, "BSM Flow Rate A");
         assert_eq!(
             rec.chromatogram_type.as_ref().unwrap().accession,

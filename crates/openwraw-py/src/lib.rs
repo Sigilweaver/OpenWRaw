@@ -110,11 +110,14 @@ fn normalize_record_json(value: &mut serde_json::Value) {
 }
 
 /// Bounded stream of canonical spectrum records.
+///
+/// A scan that cannot be decoded raises `RuntimeError` from `__next__`;
+/// calling `next()` again continues with the following scan.
 #[pyclass(module = "openwraw")]
 struct RecordIter {
     // `None` marks a complete stream, so a closed channel without it means
     // the decode thread died.
-    receiver: Mutex<Receiver<Option<SpectrumRecord>>>,
+    receiver: Mutex<Receiver<Option<openmassspec_core::Result<SpectrumRecord>>>>,
     finished: bool,
 }
 
@@ -137,7 +140,8 @@ impl RecordIter {
                 .map_err(|_| "record decode thread ended without a result")
         });
         match message {
-            Ok(Some(rec)) => record_object(py, rec).map(Some),
+            Ok(Some(Ok(rec))) => record_object(py, rec).map(Some),
+            Ok(Some(Err(error))) => Err(PyRuntimeError::new_err(error.to_string())),
             Ok(None) => {
                 slf.finished = true;
                 Ok(None)
@@ -271,7 +275,8 @@ impl FunctionInfo {
         self.inner.index
     }
 
-    /// Raw function type code (always 0x12 in known corpus).
+    /// Raw function type code: 0x12, 0x10 (MS/MS) or 0x90 (MALDI MS/MS) in
+    /// the public corpus.
     #[getter]
     fn function_type(&self) -> u8 {
         self.inner.function_type
@@ -399,7 +404,7 @@ impl ChromChannel {
 
 // -- ChromPoint --
 
-/// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
+/// A single (retention-time, value) sample from a `_CHROnnn.DAT` file.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct ChromPoint {
@@ -470,12 +475,18 @@ impl RawReader {
         )
     }
 
-    /// Canonical TIC, BPC, and other chromatograms with seconds as the time unit.
+    /// Canonical instrument chromatograms with seconds as the time unit.
+    ///
+    /// Raises `RuntimeError` when `_CHROMS.INF` or a channel's
+    /// `_CHROnnn.DAT` cannot be read.
     fn read_chromatograms(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         let mut source = ::openwraw::mzml::WatersSource::new(self.reader.clone());
         source
             .iter_chromatograms()
-            .map(|rec| json_object(py, &rec))
+            .map(|rec| {
+                let rec = rec.map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                json_object(py, &rec)
+            })
             .collect()
     }
 
@@ -515,7 +526,7 @@ impl RawReader {
         out.set_item("lteff_mm", self.ext.lteff_mm)?;
         out.set_item("veff_v", self.ext.veff_v)?;
         out.set_item("pusher_interval_us", self.ext.pusher_interval_us)?;
-        out.set_item("polarity", self.polarity())?;
+        out.set_item("polarity", self.polarity()?)?;
         let functions = PyDict::new(py);
         for (index, f) in &self.ext.functions {
             let row = PyDict::new(py);
@@ -529,7 +540,9 @@ impl RawReader {
         Ok(out)
     }
 
-    /// Collision energy and ETD mode decoded for a scan from `_FUNCnnn.STS`.
+    /// Collision energy, ETD mode and precursor m/z decoded for a scan
+    /// (`_FUNCnnn.STS`, with the `_extern.inf` set mass as the precursor
+    /// fallback). Values the bundle does not record are `None`.
     fn scan_parameters<'py>(
         &self,
         py: Python<'py>,
@@ -543,6 +556,7 @@ impl RawReader {
         let out = PyDict::new(py);
         out.set_item("collision_energy_ev", scan.collision_energy_ev)?;
         out.set_item("etd_fragmentation_mode", scan.etd_fragmentation_mode)?;
+        out.set_item("precursor_mz", scan.precursor_mz)?;
         Ok(out)
     }
 
@@ -620,6 +634,11 @@ impl RawReader {
                 out.set_item("dat_offset", row.dat_offset)?;
                 out.set_item("retention_time_min", row.retention_time_min)?;
             }
+            other => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "index variant has no Python form: {other:?}"
+                )))
+            }
         }
         Ok(out)
     }
@@ -676,11 +695,17 @@ impl RawReader {
     ///
     /// Returns `"positive"`, `"negative"`, or `None` when the field is absent.
     #[getter]
-    fn polarity(&self) -> Option<&'static str> {
-        self.ext.polarity.map(|p| match p {
-            Polarity::Positive => "positive",
-            Polarity::Negative => "negative",
-        })
+    fn polarity(&self) -> PyResult<Option<&'static str>> {
+        self.ext
+            .polarity
+            .map(|p| match p {
+                Polarity::Positive => Ok("positive"),
+                Polarity::Negative => Ok("negative"),
+                other => Err(PyRuntimeError::new_err(format!(
+                    "polarity {other:?} has no Python name"
+                ))),
+            })
+            .transpose()
     }
 
     /// List of all acquisition functions in this .raw file.
@@ -716,15 +741,11 @@ impl RawReader {
 
     /// MS level for a function (1-based `func_index`).
     ///
-    /// Returns `1` for MS1 survey and reference functions, `2` for MSe/DDA/MS2
-    /// functions. Falls back to `1` when the function is not described in
-    /// `_extern.inf`.
+    /// Returns `1` for MS1 survey and reference functions, `2` for MSe
+    /// high-energy, DDA and targeted MS/MS functions. Same rule as the
+    /// `ms_level` of the records this reader yields.
     fn ms_level(&self, func_index: u32) -> u32 {
-        self.ext
-            .functions
-            .get(&func_index)
-            .map(|f| f.mode.ms_level())
-            .unwrap_or(1)
+        self.reader.ms_level(func_index)
     }
 
     /// Number of scans in a function (1-based `func_index`).
@@ -752,16 +773,10 @@ impl RawReader {
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn retention_time(&self, func_index: u32, scan_index: usize) -> PyResult<f32> {
-        match &self.function(func_index)?.scan_index {
-            ScanIndex::A(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-            ScanIndex::B(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-        }
+        self.function(func_index)?
+            .scan_index
+            .retention_time_min(scan_index)
+            .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range")))
     }
 
     /// Decode one scan as calibrated m/z and intensity.

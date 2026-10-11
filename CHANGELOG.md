@@ -7,8 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `FunctionCal::new(cal_type, coeffs)` and
+  `ScanIndex::retention_time_min(scan_idx)`.
+- `From<openwraw::Error> for openmassspec_core::Error`, which wraps the
+  error as `openmassspec_core::Error::Vendor`.
+- `Reader::ms_level(function)`, `Reader::precursor_mz(function, scan)`,
+  `DecodedScan::precursor_mz`, `FuncSts::set_mass(scan)` and
+  `ExternFunction::collision_energy_ramp_ev`. Python
+  `RawReader.scan_parameters` returns `precursor_mz`.
+
 ### Fixed
 
+- Data-dependent (DDA) MS/MS spectra report each scan's precursor m/z from
+  the `_FUNCnnn.STS` "Set Mass" channel. Their `_extern.inf` sections store
+  `Set Mass 0.0`, which was written as precursor m/z 0.000000 on every
+  MS/MS spectrum: 19,268 spectra in 5 public bundles (PXD003126,
+  PXD029515, PXD041695 x2, PXD073126). Three more DDA bundles (PXD001123,
+  PXD010569 x2) reported one fixed method value per function (for example
+  1388.0) instead of each scan's precursor: 2,537 spectra. A stored set
+  mass of 0 is now treated as absent everywhere
+  (`ExternFunction::set_mass_da` is `None`). The precursor m/z is written
+  as both isolation window target m/z and selected ion m/z; before, only
+  the target was written.
+- The high-energy function of an MSe acquisition whose `_extern.inf`
+  section is labelled `TOF MS FUNCTION` is reported as MS2 when the section
+  records a collision-energy ramp and another `TOF MS` function of the
+  bundle records none. It was reported as MS1. Affects 3 public bundles
+  (PXD009047, PXD078353 x2; 5,401 spectra). Vion bundles exported by UNIFI
+  record no collision energy and still report both functions as MS1.
+- Python `RawReader.ms_level` uses the same rule as the records. It
+  returned 1 for DDA MS/MS functions and 2 for the low-energy `TOF PARENT`
+  function of MSe bundles.
 - Variant B `_FUNCnnn.IDX` DAT offsets are read as 64 bits (low word at
   +0x16, high word at +0x1A). Scans past 4 GiB in a `_FUNCnnn.DAT` decoded
   bytes from the start of the file, and the scan before them came back
@@ -39,9 +70,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instrument name; the DAT record width is judged from the m/z words of
   sampled scans. This also reads the 12-byte lock-mass functions of some
   Xevo G2-XS bundles, where no reference peak was found before.
-- `WatersSource` logs each scan that fails to decode, and the total, at
-  warn level instead of skipping it silently. Unreadable `_CHROMS.INF`
-  channels and `_CHROnnn.DAT` files are logged the same way.
+- `WatersSource` yields an `Err` in place of each scan that fails to
+  decode instead of skipping it silently, and an `Err` for a `_CHROMS.INF`
+  or a mappable channel's `_CHROnnn.DAT` that cannot be read instead of
+  dropping the chromatogram. `mzml::write_mzml` and `write_indexed_mzml`
+  stop at the first such error.
+- Python `RawReader.iter_records` raises `RuntimeError` for a scan that
+  fails to decode (the next `next()` call continues with the following
+  scan), and `RawReader.read_chromatograms` raises when a channel cannot be
+  read. Both skipped them before.
+- `FuncSts::from_bytes` rejects a `_FUNCnnn.STS` channel that does not fit
+  in the scan record, instead of `FuncSts::value_at` returning `None` for
+  it.
 
 ### Changed
 
@@ -54,6 +94,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DecodeParams::new(cal)`.
 - **Breaking (Python):** `RawReader.function_encoding` returns `"a"`, `"d"`
   or `"e"`.
+- **Breaking (Rust):** requires `openmassspec-core` 3.0 and Rust 1.88.
+  `WatersSource::iter_spectra` and `iter_chromatograms` yield
+  `openmassspec_core::Result` items (`SpectrumIter`, `ChromatogramIter`).
+- **Breaking (Rust):** `mzml::write_mzml` and `mzml::write_indexed_mzml`
+  return `openwraw::Result<openmassspec_core::WriteSummary>` (was
+  `openwraw::Result<()>`). A writer failure is `Error::Core` (was
+  `Error::Io`).
+- **Breaking (Rust):** `openwraw::Error` is `#[non_exhaustive]`, gains
+  variant `Core(openmassspec_core::Error)`, and its `Context` variant is
+  `#[non_exhaustive]`.
+- **Breaking (Rust):** these public types are `#[non_exhaustive]`, so
+  struct literals and exhaustive matches outside the crate no longer
+  compile: structs `ChromChannel`, `ChromsInf`, `ChromPoint`,
+  `ChannelDescriptor`, `ExternFunction`, `ExternInf`, `FunctionCal`,
+  `Header`, `FunctionInfo`, `FunctionTable`, `ScanIndexA`, `ScanIndexB`;
+  enums `ChannelEncoding`, `Polarity`, `FunctionMode`, `CalType`,
+  `ScanIndex`. Read their fields as before; build them with the parsers
+  (`from_bytes`, `from_path`, `str::parse`), `Default`, or
+  `FunctionCal::new`.
 - Corpus tests read bundles from `OPENWRAW_CORPUS`
   (`<root>/<accession>/<bundle>.raw`). With `REQUIRE_CORPUS=1` a missing
   bundle fails the test; CI requires the conformance bundle on Linux and
@@ -71,6 +130,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decoders.
 - **Breaking (Python):** `ImsSpectrum` and `RawReader.read_ims_spectrum`.
   Ion mobility is not decoded.
+- **Breaking (Rust):** the format constants `functions_inf::RECORD_SIZE`,
+  `index::STRIDE_A` and `index::STRIDE_B` are crate-private. The unused
+  `functions_inf::subtype` module (`OLDER_QTOF_SURVEY`, `G2_SURVEY`,
+  `G2_LOCKMASS`) and `index::VARIANT_A_TYPE_MARKER` are removed; the
+  `FunctionInfo::scan_subtype` docs list the observed values.
 
 ## [4.0.0] - 2026-10-04
 

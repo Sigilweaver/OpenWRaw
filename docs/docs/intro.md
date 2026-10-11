@@ -41,7 +41,7 @@ Optional Python bindings are available via the
 | `_FUNCnnn.DAT` Encoding E (12-byte records)     | supported for public LCT Premier and Xevo G2-XS lock-mass fixtures; flags/auxiliary word unresolved |
 | Ion mobility (drift time)                       | not decoded |
 | Lock-mass correction                            | not applied |
-| `_CHROMS.INF` + `_CHROnnnn.DAT` chromatograms   | supported  |
+| `_CHROMS.INF` + `_CHROnnn.DAT` chromatograms   | supported  |
 | mzML export                                     | supported  |
 | Apex3D `.bin` files, `_PROCnnn` files            | not read   |
 
