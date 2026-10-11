@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/openwraw.svg)](https://crates.io/crates/openwraw)
 [![PyPI](https://img.shields.io/pypi/v/openwraw.svg)](https://pypi.org/project/openwraw/)
 [![docs.rs](https://img.shields.io/docsrs/openwraw)](https://docs.rs/openwraw)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE)
 [![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 > Part of the [OpenMassSpec](https://github.com/Sigilweaver/OpenMassSpec)
@@ -117,7 +117,7 @@ error if any bundle fails to open, any scan fails to decode, or any lock-mass
 function is more than 100 ppm off. Add `--lock-only` to skip the full scan
 pass.
 
-The [2026-09-26 corpus audit](CORPUS-AUDIT.md) records the expanded
+The [2026-09-26 corpus audit](https://github.com/Sigilweaver/OpenWRaw/blob/main/CORPUS-AUDIT.md) records the expanded
 corpus results and the format gaps it exposed.
 
 ## Repository layout
@@ -131,8 +131,8 @@ docs/            Docusaurus site (format spec + guides)
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE).
 
 The format specification was developed by binary analysis of public
 mass-spectrometry datasets (PRIDE accessions). See
-[ATTRIBUTION.md](ATTRIBUTION.md).
+[ATTRIBUTION.md](https://github.com/Sigilweaver/OpenWRaw/blob/main/ATTRIBUTION.md).
