@@ -8,7 +8,7 @@ pub(crate) mod bytes;
 #[cfg(test)]
 pub(crate) mod test_corpus;
 
-pub use reader::{DecodedScan, DecodedSpectrum, Encoding, FunctionEntry, Reader};
+pub use reader::{DecodedScan, Encoding, FunctionEntry, Reader};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

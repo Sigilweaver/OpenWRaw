@@ -62,9 +62,3 @@ Python:
 import openwraw
 print(openwraw.__version__)
 ```
-
-CLI:
-
-```sh
-openwraw inspect path/to/sample.raw
-```

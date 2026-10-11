@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Record stride for Variant A (non-IMS / simple TOF-MS).
 pub const STRIDE_A: usize = 22;
-/// Record stride for Variant B (IMS SYNAPT and Xevo G2-XS QTof).
+/// Record stride for Variant B (SYNAPT G2-S and later, Xevo G2-XS and G3).
 pub const STRIDE_B: usize = 30;
 
 /// Constant upper-16-bit marker in the Variant A +0x04 packed field.
@@ -32,7 +32,9 @@ pub struct ScanIndexA {
 
 /// A scan index record from a Variant B (`_FUNCnnn.IDX`, 30-byte stride).
 ///
-/// Observed in SYNAPT G2-Si (IMS) and Xevo G2-XS QTof (non-IMS).
+/// Observed in SYNAPT G2-S/G2-Si/XS and Xevo G2-XS/G3 bundles. The record
+/// has no record count, so the DAT record width is judged from the data by
+/// the reader.
 #[derive(Debug, Clone)]
 pub struct ScanIndexB {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.

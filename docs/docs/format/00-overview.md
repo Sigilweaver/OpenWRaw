@@ -15,7 +15,7 @@ method, calibration state, and all acquired spectra.
 | `_HEADER.TXT` | ASCII | **Fully known** | Run metadata, calibration polynomials |
 | `_FUNCTNS.INF` | Binary | **Fully known** | Function table: one 416-byte record per MS function |
 | `_FUNCnnn.IDX` | Binary | **Fully known** | Scan index (DAT offsets, RT, housekeeping) |
-| `_FUNCnnn.DAT` | Binary | **Fully known** | Packed spectrum data (3 encodings; see below) |
+| `_FUNCnnn.DAT` | Binary | Partially decoded | Packed spectrum data (3 encodings; see below). Ion mobility not decoded |
 | `_FUNCnnn.STS` | Binary | **Fully decoded** | Per-scan instrument statistics (voltages, TIC, push count) |
 | `_CHROMS.INF` | Binary | **Fully decoded** | LC channel descriptor table |
 | `_CHROnnnn.DAT` | Binary | **Fully decoded** | LC channel time-series data (f32 RT + f32 value) |
@@ -53,66 +53,47 @@ no real sample of the latter has been found yet either (Sigilweaver/OpenWRaw#13)
 
 ## DAT Encoding Variants
 
-Four record encodings are distinguished in `_FUNCnnn.DAT`:
+Three record encodings are distinguished in `_FUNCnnn.DAT`. The encoding is a
+property of the DAT records; Encodings D and E appear behind both index
+variants.
 
 | Encoding | Record size | IDX variant | Instruments | Description |
 |----------|-------------|-------------|-------------|-------------|
-| A | 6 bytes | Variant A (22-byte IDX) | Older QTOF, Q-Tof Premier class | count(u16), m/z word(exponent nibble + u24 mantissa) |
-| B | 8 bytes | Variant B (30-byte IDX) | SYNAPT G2-Si IMS | zero(u16), count(u16), dt_bin(u16), tof_bin(u16) |
-| C | 8 bytes | Variant B (30-byte IDX) | Xevo G2-XS QTof | zero(u16), count(u16), sub_bin(u16), tof_bin(u16) |
-| D | 8 bytes | Variant A (22-byte IDX) | Vion (UNIFI export), some SYNAPT G2 | intensity(u32 16.16), m/z word(5-bit exponent + 27-bit mantissa) |
+| A | 6 bytes  | A (22-byte) | Older QTOF, Q-Tof Premier class | count(u16), m/z word (exponent nibble + u24 mantissa) |
+| D | 8 bytes  | A or B | Vion (UNIFI export), SYNAPT G2/G2-S/G2-Si/XS, Xevo G2-XS, Xevo G3 | intensity (u32 16.16), m/z word (5-bit exponent + 27-bit mantissa) |
+| E | 12 bytes | A or B | LCT Premier; some Xevo G2-XS lock-mass functions | compressed intensity, Encoding D m/z word, auxiliary word |
 
-Encodings A and D store m/z directly as a floating-point word and are checked
-against lock-mass references (see `_FUNCnnn.DAT`). The B and C readings below
-anchor each scan's first and last records to the declared mass range; they
-fail the lock-mass check and are under review.
+All three store m/z directly and are checked against lock-mass references
+(see `_FUNCnnn.DAT`).
 
 ## IDX Variants
 
 | Variant | Record size | DAT offset field | Observed in |
 |---------|-------------|-----------------|-------------|
-| A | 22 bytes | u32@0x00 | Older non-IMS QTOF |
-| B | 30 bytes | u32@0x16 | SYNAPT G2-Si (IMS and non-IMS), Xevo G2-XS |
+| A | 22 bytes | u32@0x00 | Older QTOF, Vion (UNIFI export), SYNAPT G2, LCT Premier |
+| B | 30 bytes | u64@0x16 | SYNAPT G2-S/G2-Si/XS, Xevo G2-XS, Xevo G3 |
 
-Variant B is used by both IMS and non-IMS Xevo/SYNAPT G2-generation
-instruments. IDX stride alone does not distinguish IMS from non-IMS;
-presence of `APEXnnnD.BIN` or `APEXnnnDIONS.CSV` is the reliable IMS indicator.
+Variant A records carry a record count, so the DAT record width follows from
+consecutive offsets. Variant B records do not; the reader judges the width
+from the position words of sampled scans. The index variant does not
+indicate an ion mobility acquisition.
 
 ## m/z Decoding Summary
 
-Encodings A and D store m/z directly; only the T1 polynomial applies, to
-sqrt(m/z). Encodings B and C use the flight-time model below.
+Every encoding stores an uncalibrated m/z as a floating-point word; only the
+T1 polynomial from `_HEADER.TXT` applies, to sqrt(m/z). No lock-mass
+correction is applied.
 
 ```
-# Encoding A (6-byte) and D (8-byte, 22-byte IDX):
-mz_uncal = mantissa * 2^(exponent - mantissa_bits)   # 24 bits (A) or 27 bits (D)
+mz_uncal = mantissa * 2^(exponent - mantissa_bits)   # 24 bits (A) or 27 bits (D, E)
 mz       = (T1(sqrt(mz_uncal)))^2
-
-# Common to B and C:
-A_us   = sqrt(m_proton * Lteff_m / (2 * e * Veff)) * 1e6  # from _extern.inf
-mz     = (t_cal_us / A_us)^2
-t_cal  = c0 + c1*t_raw + c2*t_raw^2 + ... + ck*t_raw^k  # T1 polynomial, _HEADER.TXT
-
-# Encoding B (8-byte, SYNAPT G2-Si IMS):
-#   bytes[2:4]=count(u16), bytes[4:6]=dt_bin(u16), bytes[6:8]=tof_bin(u16)
-#   tof_bin_low/high from first/last record of scan (sentinel if count=0, else first hit).
-t_low_us   = A_us * sqrt(mz_low)
-t_high_us  = A_us * sqrt(mz_high)
-t_bin_us   = (t_high_us - t_low_us) / (tof_bin_high - tof_bin_low)
-t_raw_us   = t_low_us + (tof_bin - tof_bin_low) * t_bin_us
-drift_ms   = dt_bin * scan_time_ms / 65536  # scan_time_ms from _FUNCTNS.INF
-
-# Encoding C (8-byte, Xevo G2-XS):
-#   First record = sentinel at mz_low_bin, last = sentinel at mz_high_bin.
-t_low_us   = A_us * sqrt(mz_low)
-t_high_us  = A_us * sqrt(mz_high)
-t_bin_us   = (t_high_us - t_low_us) / (mz_high_bin - mz_low_bin)
-frac_bin   = (tof_bin - mz_low_bin) + sub_bin / 65536
-t_raw_us   = t_low_us + frac_bin * t_bin_us
+T1(x)    = c0 + c1*x + c2*x^2 + ... + ck*x^k          # "Cal Function N", _HEADER.TXT
 ```
 
-where `m_proton = 1.6726e-27 kg`, `e = 1.6022e-19 C`,
-`Lteff_m = Lteff_mm / 1000`, and `mz_low`/`mz_high` come from `_FUNCTNS.INF`.
+## Ion Mobility
+
+Ion mobility is not decoded. SYNAPT scans are returned as m/z and intensity
+only; where drift time is stored is unresolved (see `_FUNCnnn.DAT`).
 
 ## Waters Parameter Table Format
 
@@ -141,8 +122,9 @@ Its descriptor count is not a count of records to skip after the header.
 
 | Instrument | Notes |
 |---|---|
-| Waters SYNAPT G2-Si | IMS + MS; IDX Variant B; DAT Encoding B (IMS) |
-| Waters Xevo G2-XS QTof | No IMS; IDX Variant B; DAT Encoding C |
+| Waters SYNAPT G2-S / G2-Si / XS | IMS-capable; IDX Variant B; DAT Encoding D (mobility not decoded) |
+| Waters Xevo G2-XS QTof | No IMS; IDX Variant B; DAT Encoding D (some lock-mass functions Encoding E) |
+| Waters Xevo G3 QTof | No IMS; IDX Variant B; DAT Encoding D |
 | Waters Q-TOF Ultima | No IMS; IDX Variant A; DAT Encoding A |
 | Waters Vion IMS QTof (UNIFI export) | IDX Variant A; DAT Encoding D |
 
@@ -151,10 +133,10 @@ Its descriptor count is not a count of records to skip after the header.
 | Accession | Instrument | Notes |
 |-----------|-----------|-------|
 | PXD058812 | Q-TOF (non-IMS) | 3 small files, Encoding A, 197-426 scans |
-| PXD066594 | SYNAPT G2-Si IMS | WANG.raw, 590 scans, large IMS data |
-| PXD068881 | SYNAPT G2-Si IMS | CtpA LC-MS, 1138 scans, has CHROMS.INF |
-| PXD075602 | Xevo G2-XS QTof | DHPR LC-MS, 3 functions, Encoding C |
-| PXD035818 | SYNAPT G2-S | 17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw, targeted MS/MS (`TOF MSMS FUNCTION`, Set Mass 884.9), Encoding B (IMS-style records; TriWave hardware present even for this non-IMS-separated acquisition) |
+| PXD066594 | SYNAPT G2-Si | WANG.raw, 590 scans, Encoding D |
+| PXD068881 | SYNAPT G2-Si | CtpA LC-MS, 1138 scans, Encoding D, has CHROMS.INF |
+| PXD075602 | Xevo G2-XS QTof | DHPR LC-MS, 3 functions, Encoding D |
+| PXD035818 | SYNAPT G2-S | 17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw, targeted MS/MS (`TOF MSMS FUNCTION`, Set Mass 884.9), IDX Variant B, Encoding D |
 
 ## See Also
 

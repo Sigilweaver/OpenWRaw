@@ -73,6 +73,25 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
+## Known issues
+
+- **No ion mobility decoding.** SYNAPT scans are returned as m/z and
+  intensity only. There is no drift-time output, and mzML output carries no
+  mobility arrays.
+- **No lock-mass correction.** m/z uses only the calibration stored in
+  `_HEADER.TXT`. Lock-mass functions are skipped when iterating spectra and
+  are not used to correct the others. Across the public test corpus the
+  uncorrected lock-mass reference sits within about 75 ppm for most
+  bundles. Three lock-mass functions exceed the 100 ppm audit gate:
+  PXD001175 `S121126_06.raw` (+162 ppm), PXD069628 `HC20_CE` (-108 ppm)
+  and PXD029515 `blast_young_0h_H1__MSMS.raw` (-153 ppm). Their offsets are
+  uniform across the reference peak and its isotopes; the cause is not
+  established.
+- Encoding E (12-byte records) intensity flag bits and auxiliary word are
+  not interpreted; flagged peaks are kept. Encoding E spectra are labelled
+  centroid. That is confirmed from point spacing for the Xevo G2-XS
+  lock-mass functions but not for LCT Premier bundles.
+
 ## Debug logging
 
 OpenWRaw logs how it reads a bundle: which side files it resolved

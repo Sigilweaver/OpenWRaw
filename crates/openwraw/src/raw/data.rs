@@ -1,42 +1,36 @@
 // Reader for _FUNCnnn.DAT - the binary spectrum data files.
 // Spectra are stored contiguously, referenced by offsets from the
-// paired .IDX file. Multiple compression schemes are known to exist
-// across instrument generations; scheme detection is done per-spectrum.
+// paired .IDX file. The record layout is chosen per function by the reader
+// (see `crate::reader::Encoding`).
 
-use crate::bytes::read_u16_le;
 use crate::raw::header::FunctionCal;
 
-/// Parameters required by all three DAT decoders.
+/// Parameters shared by the DAT decoders.
 ///
-/// Construct one `DecodeParams` per function per run by combining the
-/// outputs of `Header` (calibration polynomial), `ExternInf` (A_us),
-/// and `FunctionInfo` (mass range, scan time).
+/// Every decoder reads an uncalibrated m/z from each record and applies the
+/// function's `_HEADER.TXT` T1 calibration polynomial to sqrt(m/z).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct DecodeParams {
-    /// TOF constant A (µs / sqrt(Da)).  Computed by `ExternInf::a_us()`.
-    pub a_us: f64,
     /// Per-function T1 calibration polynomial from `_HEADER.TXT`.
     pub cal: FunctionCal,
-    /// Acquisition m/z lower bound (Da), from `_FUNCTNS.INF` +0x0A0.
-    pub mz_low: f64,
-    /// Acquisition m/z upper bound (Da), from `_FUNCTNS.INF` +0x120.
-    pub mz_high: f64,
-    /// Scan duration (ms), from `_FUNCTNS.INF` +0x020 × 1000.
-    /// Used only by Encoding B to convert dt_bin to drift time.
-    pub scan_time_ms: f64,
 }
 
-/// Decoded spectrum from a non-IMS scan (Encoding A or C).
+impl DecodeParams {
+    /// Parameters for a function calibrated by `cal`.
+    pub fn new(cal: FunctionCal) -> Self {
+        Self { cal }
+    }
+}
+
+/// One decoded scan: calibrated m/z (Da) and intensity per profile point.
+///
+/// No lock-mass correction is applied. Ion mobility is not decoded, so a
+/// scan from a mobility acquisition is returned as a plain m/z spectrum.
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct Spectrum {
     pub mz: Vec<f64>,
-    pub intensity: Vec<f32>,
-}
-
-/// Decoded spectrum from an IMS scan (Encoding B).
-#[derive(Debug, Default, Clone)]
-pub struct ImsSpectrum {
-    pub mz: Vec<f64>,
-    pub drift_time_ms: Vec<f64>,
     pub intensity: Vec<f32>,
 }
 
@@ -90,136 +84,6 @@ pub fn decode_encoding_a(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
-// -- Encoding B --
-
-/// Decode one scan slice from an Encoding B `_FUNCnnn.DAT` file (IMS mode).
-///
-/// `scan_bytes` must be the exact bytes of one scan as given by the paired
-/// `_FUNCnnn.IDX` Variant B record (offset at +0x16; length from next offset).
-///
-/// The first and last record's `tof_bin` fields anchor the TOF bin→µs scale.
-/// Records with `count == 0` (sentinels) are skipped in the output.
-pub fn decode_encoding_b(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<ImsSpectrum> {
-    if scan_bytes.is_empty() {
-        return Ok(ImsSpectrum::default());
-    }
-    if scan_bytes.len() % 8 != 0 {
-        return Err(crate::Error::Parse(format!(
-            "Encoding B: scan size {} is not a multiple of 8",
-            scan_bytes.len()
-        )));
-    }
-
-    let n = scan_bytes.len() / 8;
-    if n < 2 {
-        // Cannot derive the bin→time scale from a single record.
-        return Ok(ImsSpectrum::default());
-    }
-
-    let tof_bin_low = read_u16_le(scan_bytes, 6)? as f64;
-    let last = &scan_bytes[(n - 1) * 8..n * 8];
-    let tof_bin_high = read_u16_le(last, 6)? as f64;
-
-    if tof_bin_high <= tof_bin_low {
-        // Empty or degenerate scan; return empty without error.
-        return Ok(ImsSpectrum::default());
-    }
-
-    let t_low = params.a_us * params.mz_low.sqrt();
-    let t_high = params.a_us * params.mz_high.sqrt();
-    let t_bin = (t_high - t_low) / (tof_bin_high - tof_bin_low);
-
-    let mut out = ImsSpectrum {
-        mz: Vec::with_capacity(n),
-        drift_time_ms: Vec::with_capacity(n),
-        intensity: Vec::with_capacity(n),
-    };
-
-    for i in 0..n {
-        let rec = &scan_bytes[i * 8..(i + 1) * 8];
-        let count = read_u16_le(rec, 2)?;
-        let dt_bin = read_u16_le(rec, 4)? as f64;
-        let tof_bin = read_u16_le(rec, 6)? as f64;
-
-        if count == 0 {
-            continue;
-        }
-
-        let t_raw = t_low + (tof_bin - tof_bin_low) * t_bin;
-        let t_cal = params.cal.apply(t_raw);
-        out.mz.push((t_cal / params.a_us).powi(2));
-        out.drift_time_ms
-            .push(dt_bin * params.scan_time_ms / 65536.0);
-        out.intensity.push(count as f32);
-    }
-
-    Ok(out)
-}
-
-// -- Encoding C --
-
-/// Decode one scan slice from an Encoding C `_FUNCnnn.DAT` file (non-IMS QTof).
-///
-/// `scan_bytes` must be the exact bytes of one scan as given by the paired
-/// `_FUNCnnn.IDX` Variant B record (offset at +0x16; length from next offset).
-///
-/// The first record's `tof_bin` = mz_low_bin; the last record's `tof_bin` =
-/// mz_high_bin.  Zero-intensity records (sentinels) are skipped in the output.
-/// The `sub_bin` field (bytes 4-5) provides fractional TOF bin position.
-pub fn decode_encoding_c(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
-    if scan_bytes.is_empty() {
-        return Ok(Spectrum::default());
-    }
-    if scan_bytes.len() % 8 != 0 {
-        return Err(crate::Error::Parse(format!(
-            "Encoding C: scan size {} is not a multiple of 8",
-            scan_bytes.len()
-        )));
-    }
-
-    let n = scan_bytes.len() / 8;
-    if n < 2 {
-        return Ok(Spectrum::default());
-    }
-
-    let tof_bin_low = read_u16_le(scan_bytes, 6)? as f64;
-    let last = &scan_bytes[(n - 1) * 8..n * 8];
-    let tof_bin_high = read_u16_le(last, 6)? as f64;
-
-    if tof_bin_high <= tof_bin_low {
-        return Ok(Spectrum::default());
-    }
-
-    let t_low = params.a_us * params.mz_low.sqrt();
-    let t_high = params.a_us * params.mz_high.sqrt();
-    let t_bin = (t_high - t_low) / (tof_bin_high - tof_bin_low);
-
-    let mut out = Spectrum {
-        mz: Vec::with_capacity(n.saturating_sub(2)),
-        intensity: Vec::with_capacity(n.saturating_sub(2)),
-    };
-
-    for i in 0..n {
-        let rec = &scan_bytes[i * 8..(i + 1) * 8];
-        // bytes[0:2] always 0x0000 for Encoding C (no drift axis)
-        let intensity = read_u16_le(rec, 2)?;
-        let sub_bin = read_u16_le(rec, 4)? as f64;
-        let tof_bin = read_u16_le(rec, 6)? as f64;
-
-        if intensity == 0 {
-            continue;
-        }
-
-        let frac_bin = (tof_bin - tof_bin_low) + sub_bin / 65536.0;
-        let t_raw = t_low + frac_bin * t_bin;
-        let t_cal = params.cal.apply(t_raw);
-        out.mz.push((t_cal / params.a_us).powi(2));
-        out.intensity.push(intensity as f32);
-    }
-
-    Ok(out)
-}
-
 // -- Encoding D --
 
 /// Bit 26 of the Encoding D position word is always set: the mantissa
@@ -244,10 +108,14 @@ fn encoding_d_mz(u: u32) -> crate::Result<f64> {
 
 /// Decode one scan slice from an Encoding D `_FUNCnnn.DAT` file.
 ///
-/// Encoding D pairs a 22-byte Variant A index with 8-byte records:
-/// bytes 0-3 are intensity as unsigned 16.16 fixed point and bytes 4-7 are
-/// a floating-point m/z word (see `encoding_d_mz`). The `_HEADER.TXT`
-/// T1 polynomial applies to sqrt(m/z), which is proportional to flight time.
+/// Encoding D uses 8-byte records with either index variant (22-byte
+/// Variant A or 30-byte Variant B): bytes 0-3 are intensity as unsigned
+/// 16.16 fixed point and bytes 4-7 are a floating-point m/z word (see
+/// `encoding_d_mz`). The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z),
+/// which is proportional to flight time.
+///
+/// Records with zero intensity are skipped. A position word without the
+/// leading mantissa bit is an error, not a skipped record.
 pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
     if scan_bytes.len() % 8 != 0 {
         return Err(crate::Error::Parse(format!(
@@ -273,9 +141,42 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     Ok(out)
 }
 
+/// Record width (8 or 12 bytes) of one Variant B scan, judged from the
+/// position words, or `None` when the scan does not decide it.
+///
+/// Variant B index records carry no record count, so the width is read from
+/// the data: under the right width every record's bytes 4-7 are a position
+/// word with the leading mantissa bit set and m/z never decreases within a
+/// scan. Scans with fewer than three records under either width are not
+/// used, since a short scan can fit both by chance.
+pub(crate) fn variant_b_record_width(scan_bytes: &[u8]) -> Option<u64> {
+    let fits = |width: usize| {
+        if scan_bytes.len() % width != 0 || scan_bytes.len() / width < 3 {
+            return false;
+        }
+        let mut previous = 0u32;
+        scan_bytes.chunks_exact(width).all(|rec| {
+            let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
+            let ok = position & ENC_D_LEADING_ONE != 0 && position >= previous;
+            previous = position;
+            ok
+        })
+    };
+    match (fits(8), fits(12)) {
+        (true, false) => Some(8),
+        (false, true) => Some(12),
+        _ => None,
+    }
+}
+
 // -- Encoding E --
 
-/// Decode the 12-byte Variant A records observed in public LCT Premier bundles.
+/// Decode one scan slice from an Encoding E `_FUNCnnn.DAT` file.
+///
+/// Encoding E uses 12-byte records. It is observed with the 22-byte
+/// Variant A index in public LCT Premier bundles and with the 30-byte
+/// Variant B index in the lock-mass functions of some public Xevo G2-XS
+/// bundles.
 ///
 /// The intensity word has a 21-bit normalized mantissa and a 5-bit exponent
 /// at bits 22-26: intensity = mantissa * 2^(exponent - 21). Higher bits are
@@ -330,18 +231,8 @@ mod tests {
         }
     }
 
-    // Params for easy mental arithmetic:
-    //   a_us=1.0 µs/sqrt(Da), mz_low=4.0, mz_high=100.0
-    //   t_low=2.0 µs, t_high=10.0 µs
-    //   scan_time_ms=1000.0
     fn test_params() -> DecodeParams {
-        DecodeParams {
-            a_us: 1.0,
-            cal: identity_cal(),
-            mz_low: 4.0,
-            mz_high: 100.0,
-            scan_time_ms: 1000.0,
-        }
+        DecodeParams::new(identity_cal())
     }
 
     // -- Encoding A helpers --
@@ -352,24 +243,6 @@ mod tests {
         r[0..2].copy_from_slice(&count.to_le_bytes());
         r[2] = exponent << 4;
         r[3..6].copy_from_slice(&mantissa.to_le_bytes()[..3]);
-        r
-    }
-
-    // -- Encoding B/C helpers --
-
-    fn enc_b_record(count: u16, dt_bin: u16, tof_bin: u16) -> [u8; 8] {
-        let mut r = [0u8; 8];
-        r[2..4].copy_from_slice(&count.to_le_bytes());
-        r[4..6].copy_from_slice(&dt_bin.to_le_bytes());
-        r[6..8].copy_from_slice(&tof_bin.to_le_bytes());
-        r
-    }
-
-    fn enc_c_record(intensity: u16, sub_bin: u16, tof_bin: u16) -> [u8; 8] {
-        let mut r = [0u8; 8];
-        r[2..4].copy_from_slice(&intensity.to_le_bytes());
-        r[4..6].copy_from_slice(&sub_bin.to_le_bytes());
-        r[6..8].copy_from_slice(&tof_bin.to_le_bytes());
         r
     }
 
@@ -419,6 +292,94 @@ mod tests {
         let scan = bytes_of(&[enc_d_record(1 << 16, 0x5400_0000)]);
         let spec = decode_encoding_d(&scan, &params).unwrap();
         assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
+    }
+
+    // -- Encoding D on the 30-byte (Variant B) index --
+
+    /// Five consecutive records around the leucine enkephalin [M+H]+ apex of
+    /// a lock-mass scan in public bundle PXD068881 (SYNAPT G2-Si, function 3,
+    /// scan 4), as stored in `_FUNC003.DAT`.
+    const SYNAPT_LOCK_RECORDS: [[u8; 8]; 5] = [
+        [0x00, 0x64, 0xd6, 0x02, 0xc8, 0x7c, 0x58, 0x54],
+        [0x00, 0x41, 0x55, 0x03, 0x08, 0x82, 0x58, 0x54],
+        [0x00, 0xc2, 0x5f, 0x03, 0x50, 0x87, 0x58, 0x54],
+        [0x00, 0xc5, 0x53, 0x03, 0x98, 0x8c, 0x58, 0x54],
+        [0x00, 0xea, 0x12, 0x03, 0xd8, 0x91, 0x58, 0x54],
+    ];
+
+    /// `Cal Function 3` from the same bundle's `_HEADER.TXT`, digits as
+    /// written there.
+    #[allow(clippy::excessive_precision)]
+    fn synapt_lock_cal() -> FunctionCal {
+        FunctionCal {
+            coeffs: vec![
+                -5.493524164097924e-4,
+                9.997320908477830e-1,
+                2.699224919217800e-5,
+                -9.288655145431219e-7,
+                1.489803356847283e-8,
+                -9.018736795357334e-11,
+            ],
+            cal_type: CalType::T1,
+        }
+    }
+
+    #[test]
+    fn enc_d_decodes_variant_b_records_with_fractional_intensity() {
+        let scan = bytes_of(&SYNAPT_LOCK_RECORDS);
+        let spec = decode_encoding_d(&scan, &test_params()).unwrap();
+        assert_eq!(spec.mz.len(), 5);
+        // Uncalibrated m/z steps by one ADC sample (about 0.0103 Da here).
+        assert!((spec.mz[3] - 556.274_597).abs() < 1e-5, "{}", spec.mz[3]);
+        assert!(spec.mz.windows(2).all(|w| w[1] > w[0]));
+        // Bytes 0-1 are the fraction of a 16.16 intensity: 0x0353_c500.
+        assert_eq!(spec.intensity[3], 851.769_53);
+    }
+
+    #[test]
+    fn enc_d_variant_b_lock_apex_is_within_tens_of_ppm() {
+        const LEU_ENK_MH: f64 = 556.2766;
+        let scan = bytes_of(&SYNAPT_LOCK_RECORDS);
+        let spec = decode_encoding_d(&scan, &DecodeParams::new(synapt_lock_cal())).unwrap();
+        let ppm = (spec.mz[3] - LEU_ENK_MH) / LEU_ENK_MH * 1e6;
+        assert!(
+            ppm.abs() < 20.0,
+            "apex record at {} ({ppm:.1} ppm)",
+            spec.mz[3]
+        );
+    }
+
+    #[test]
+    fn variant_b_width_is_read_from_position_words() {
+        assert_eq!(
+            variant_b_record_width(&bytes_of(&SYNAPT_LOCK_RECORDS)),
+            Some(8)
+        );
+        // 12-byte records from a public Xevo G2-XS lock-mass function
+        // (PXD053170 20231113_NSE_Sample_High.raw, _FUNC002.DAT).
+        let xevo_lock = bytes_of(&[
+            enc_e_record(0x0290_f562, 0x5458_0198, 0x0488_6c2c),
+            enc_e_record(0x0414_e82b, 0x5458_3200, 0x04b9_493f),
+            enc_e_record(0x1557_d0aa, 0x5458_5190, 0x00de_07a9),
+            enc_e_record(0x041e_92f9, 0x5458_70d0, 0x00bb_49a1),
+        ]);
+        assert_eq!(variant_b_record_width(&xevo_lock), Some(12));
+        // Too short to decide, and decreasing m/z fits neither width.
+        assert_eq!(
+            variant_b_record_width(&bytes_of(&SYNAPT_LOCK_RECORDS[..2])),
+            None
+        );
+        let mut reversed = SYNAPT_LOCK_RECORDS;
+        reversed.reverse();
+        assert_eq!(variant_b_record_width(&bytes_of(&reversed)), None);
+        assert_eq!(variant_b_record_width(&[]), None);
+    }
+
+    #[test]
+    fn enc_d_rejects_word_without_leading_bit_in_variant_b_scan() {
+        let mut recs = SYNAPT_LOCK_RECORDS;
+        recs[2][7] = 0x50; // clears bit 26 of the position word
+        assert!(decode_encoding_d(&bytes_of(&recs), &test_params()).is_err());
     }
 
     // -- Encoding E tests --
@@ -526,150 +487,24 @@ mod tests {
         assert!(decode_encoding_a(&data, &test_params()).is_err());
     }
 
-    // -- Encoding B tests --
-
-    // With a_us=1.0, mz_low=4.0, mz_high=100.0:
-    //   t_low=2.0, t_high=10.0, tof_bin_low=2000, tof_bin_high=10000
-    //   t_bin = 8.0/8000 = 0.001 µs/bin
-    //   tof_bin=6000 → t_raw=2.0+(6000-2000)*0.001=6.0 µs → mz=36.0 Da
-    //   dt_bin=3000, scan_time_ms=1000 → drift=3000*1000/65536≈45.8 ms
-    #[test]
-    fn enc_b_decodes_peak_mz_and_drift() {
-        let scan = bytes_of(&[
-            enc_b_record(0, 0, 2000),    // first (sentinel, count=0, tof_bin_low)
-            enc_b_record(5, 3000, 6000), // data
-            enc_b_record(0, 0, 10000),   // last (sentinel, count=0, tof_bin_high)
-        ]);
-        let spec = decode_encoding_b(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
-        assert!((spec.mz[0] - 36.0).abs() < 1e-8, "mz={}", spec.mz[0]);
-        assert_eq!(spec.intensity[0], 5.0);
-        let expected_drift = 3000.0 * 1000.0 / 65536.0;
-        assert!((spec.drift_time_ms[0] - expected_drift).abs() < 1e-6);
-    }
-
-    #[test]
-    fn enc_b_skips_zero_count_sentinel() {
-        let scan = bytes_of(&[
-            enc_b_record(0, 0, 2000),   // sentinel low
-            enc_b_record(3, 100, 5000), // data
-            enc_b_record(0, 0, 10000),  // sentinel high
-        ]);
-        let spec = decode_encoding_b(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
-    }
-
-    #[test]
-    fn enc_b_empty_bytes_is_empty() {
-        let spec = decode_encoding_b(&[], &test_params()).unwrap();
-        assert!(spec.mz.is_empty());
-    }
-
-    #[test]
-    fn enc_b_all_zero_count_is_empty_output() {
-        // scan where every record has count=0 (blank scan)
-        let scan = bytes_of(&[
-            enc_b_record(0, 0, 2000),
-            enc_b_record(0, 100, 6000),
-            enc_b_record(0, 0, 10000),
-        ]);
-        let spec = decode_encoding_b(&scan, &test_params()).unwrap();
-        assert!(spec.mz.is_empty());
-    }
-
-    #[test]
-    fn enc_b_bad_size_is_error() {
-        let data = vec![0u8; 9]; // not multiple of 8
-        assert!(decode_encoding_b(&data, &test_params()).is_err());
-    }
-
-    // -- Encoding C tests --
-
-    // Same calibration as Encoding B.
-    // sub_bin=0 → frac_bin = tof_bin - tof_bin_low, same formula as B.
-    // sub_bin=32768 → adds 0.5 to frac_bin.
-    #[test]
-    fn enc_c_decodes_peak_mz_no_subbin() {
-        let scan = bytes_of(&[
-            enc_c_record(0, 0, 2000),  // sentinel low
-            enc_c_record(7, 0, 6000),  // data, sub_bin=0
-            enc_c_record(0, 0, 10000), // sentinel high
-        ]);
-        let spec = decode_encoding_c(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
-        // frac_bin = 4000 + 0 = 4000 → t_raw=2.0+4000*0.001=6.0 → mz=36.0
-        assert!((spec.mz[0] - 36.0).abs() < 1e-8, "mz={}", spec.mz[0]);
-        assert_eq!(spec.intensity[0], 7.0);
-    }
-
-    #[test]
-    fn enc_c_subbin_gives_finer_mz_than_no_subbin() {
-        let scan_no_sub = bytes_of(&[
-            enc_c_record(0, 0, 2000),
-            enc_c_record(1, 0, 6000), // sub_bin=0
-            enc_c_record(0, 0, 10000),
-        ]);
-        let scan_half_sub = bytes_of(&[
-            enc_c_record(0, 0, 2000),
-            enc_c_record(1, 32768, 6000), // sub_bin=32768 → +0.5 bin
-            enc_c_record(0, 0, 10000),
-        ]);
-        let p = test_params();
-        let spec_no = decode_encoding_c(&scan_no_sub, &p).unwrap();
-        let spec_sub = decode_encoding_c(&scan_half_sub, &p).unwrap();
-        // sub_bin=32768 shifts frac_bin by +0.5, so mz should be slightly higher.
-        assert!(spec_sub.mz[0] > spec_no.mz[0]);
-        // Difference should be small (~0.01 Da at mz=36)
-        assert!((spec_sub.mz[0] - spec_no.mz[0]) < 0.1);
-    }
-
-    #[test]
-    fn enc_c_skips_zero_intensity_sentinels() {
-        let scan = bytes_of(&[
-            enc_c_record(0, 0, 2000),  // sentinel
-            enc_c_record(5, 0, 5000),  // data
-            enc_c_record(0, 0, 10000), // sentinel
-        ]);
-        let spec = decode_encoding_c(&scan, &test_params()).unwrap();
-        assert_eq!(spec.mz.len(), 1);
-    }
-
-    #[test]
-    fn enc_c_empty_bytes_is_empty() {
-        let spec = decode_encoding_c(&[], &test_params()).unwrap();
-        assert!(spec.mz.is_empty());
-    }
-
-    #[test]
-    fn enc_c_bad_size_is_error() {
-        let data = vec![0u8; 11]; // not multiple of 8
-        assert!(decode_encoding_c(&data, &test_params()).is_err());
-    }
-
     // -- Corpus integration tests --
     // These tests read bundles under OPENWRAW_CORPUS and skip when absent
     // (fail instead with REQUIRE_CORPUS=1); see crate::test_corpus.
 
     #[test]
     fn corpus_encoding_a_pxd058812() {
-        use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
+        use crate::raw::{functions_inf::FunctionTable, index::ScanIndex};
 
         let Some(raw) = crate::test_corpus::bundle(&["PXD058812/molecular_mass_P15_01.raw"]) else {
             return;
         };
 
         let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
-        let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
         let funcs = FunctionTable::from_path(&raw.join("_FUNCTNS.INF")).unwrap();
         let f = &funcs.functions[0];
 
-        let params = DecodeParams {
-            a_us: ext.a_us(),
-            cal: header.cal_functions[&1].clone(),
-            mz_low: f.mz_low as f64,
-            mz_high: f.mz_high as f64,
-            scan_time_ms: f.scan_time_s as f64 * 1000.0,
-        };
+        let params = DecodeParams::new(header.cal_functions[&1].clone());
+        let (mz_low, mz_high) = (f64::from(f.mz_low), f64::from(f.mz_high));
 
         let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
         let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
@@ -687,136 +522,11 @@ mod tests {
         // Calibration moves peaks by well under 1%, so every decoded peak stays
         // inside the declared acquisition range.
         for &m in &spec.mz {
-            assert!(m >= params.mz_low * 0.99, "mz={m} below mz_low");
-            assert!(m <= params.mz_high * 1.01, "mz={m} above mz_high");
+            assert!(m >= mz_low * 0.99, "mz={m} below mz_low");
+            assert!(m <= mz_high * 1.01, "mz={m} above mz_high");
         }
         for &i in &spec.intensity {
             assert!(i > 0.0, "zero intensity should have been filtered");
         }
-    }
-
-    #[test]
-    fn corpus_encoding_b_pxd068881() {
-        use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
-
-        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
-        else {
-            return;
-        };
-
-        let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
-        let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
-        let funcs = FunctionTable::from_path(&raw.join("_FUNCTNS.INF")).unwrap();
-        let f = &funcs.functions[0];
-
-        let params = DecodeParams {
-            a_us: ext.a_us(),
-            cal: header.cal_functions[&1].clone(),
-            mz_low: f.mz_low as f64,
-            mz_high: f.mz_high as f64,
-            scan_time_ms: f.scan_time_s as f64 * 1000.0,
-        };
-
-        let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
-        let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
-        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap() else {
-            panic!("expected Variant B")
-        };
-
-        // Find the first scan with at least one non-zero-count record.
-        let mut found_data = false;
-        for (i, rec) in idx.iter().enumerate() {
-            let start = rec.dat_offset as usize;
-            let end = idx
-                .get(i + 1)
-                .map(|r| r.dat_offset as usize)
-                .unwrap_or(dat_bytes.len());
-            if end <= start {
-                continue;
-            }
-            let scan_bytes = &dat_bytes[start..end];
-            let spec = decode_encoding_b(scan_bytes, &params).unwrap();
-            if spec.mz.is_empty() {
-                continue;
-            }
-            found_data = true;
-            for &m in &spec.mz {
-                assert!(m >= params.mz_low * 0.99, "mz={m} below mz_low");
-                assert!(m <= params.mz_high * 1.01, "mz={m} above mz_high");
-            }
-            for &d in &spec.drift_time_ms {
-                assert!(
-                    d >= 0.0 && d <= params.scan_time_ms,
-                    "drift={d} out of range"
-                );
-            }
-            break;
-        }
-        assert!(found_data, "no scan with IMS data found in function 1");
-    }
-
-    #[test]
-    fn corpus_encoding_c_pxd075602() {
-        use crate::raw::{extern_inf::ExternInf, functions_inf::FunctionTable, index::ScanIndex};
-
-        let Some(raw) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
-            return;
-        };
-
-        let header = crate::raw::header::Header::from_path(&raw.join("_HEADER.TXT")).unwrap();
-        let ext = ExternInf::from_path(&raw.join("_extern.inf")).unwrap();
-        let funcs = FunctionTable::from_path(&raw.join("_FUNCTNS.INF")).unwrap();
-        let f = &funcs.functions[0];
-
-        let params = DecodeParams {
-            a_us: ext.a_us(),
-            cal: header.cal_functions[&1].clone(),
-            mz_low: f.mz_low as f64,
-            mz_high: f.mz_high as f64,
-            scan_time_ms: f.scan_time_s as f64 * 1000.0,
-        };
-
-        let idx_bytes = std::fs::read(raw.join("_FUNC001.IDX")).unwrap();
-        let dat_bytes = std::fs::read(raw.join("_FUNC001.DAT")).unwrap();
-        let ScanIndex::B(idx) = ScanIndex::from_bytes(&idx_bytes).unwrap() else {
-            panic!("expected Variant B")
-        };
-
-        // Scan 575 is mid-gradient (RT≈10 min) and expected to have signal.
-        // Enumerate from scan 575 and take the first non-empty one.
-        let mut found_data = false;
-        for i in 575..idx.len() {
-            let start = idx[i].dat_offset as usize;
-            let end = idx
-                .get(i + 1)
-                .map(|r| r.dat_offset as usize)
-                .unwrap_or(dat_bytes.len());
-            let scan_bytes = &dat_bytes[start..end];
-            let spec = decode_encoding_c(scan_bytes, &params).unwrap();
-            if spec.mz.is_empty() {
-                continue;
-            }
-            found_data = true;
-            for &m in &spec.mz {
-                assert!(
-                    m >= params.mz_low * 0.99,
-                    "mz={m} below mz_low={}",
-                    params.mz_low
-                );
-                assert!(
-                    m <= params.mz_high * 1.01,
-                    "mz={m} above mz_high={}",
-                    params.mz_high
-                );
-            }
-            for &inten in &spec.intensity {
-                assert!(inten > 0.0, "zero-intensity record should be filtered");
-            }
-            break;
-        }
-        assert!(
-            found_data,
-            "no non-empty Encoding C scan found near scan 575"
-        );
     }
 }
