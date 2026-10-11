@@ -20,7 +20,7 @@ All unlisted byte positions are zero in the entire corpus.
 
 | Offset | Size | Type | Confirmed | Description |
 |--------|------|------|-----------|-------------|
-| 0x000  | 1    | u8   | Yes       | function_type_code: 0x12 (=18) in all corpus records, all of which are TOF acquisitions |
+| 0x000  | 1    | u8   | Partial   | function_type_code: 0x12, 0x10 or 0x90 in the corpus; see [Function Type Code](#function-type-code-byte-0x000) |
 | 0x001  | 1    | u8   | Partial   | scan_subtype: 0x25 = older non-IMS QTOF; 0x71 = G2-Si/G2-XS survey; 0xf1 = G2-Si/G2-XS lock-mass reference (= 0x71 | 0x80) |
 | 0x002  | 4    | f32  | Yes       | cycle_contribution (s) = scan_time + interscan_delay; confirmed as scan_time + interscan_delay for all 9 records |
 | 0x006  | 4    | f32  | Yes       | interscan_delay (s), duplicate of 0x01C |
@@ -71,6 +71,23 @@ It equals `floor(pusher_interval_µs * 1000 / tdc_bin_ns)`.
 | CtpA G2-Si| 69          | 16704      | 4.13                |
 | DHPR G2-XS| 60.25       | 16800      | 3.59                |
 
+## Function Type Code (byte 0x000)
+
+Observed across the 79 `.raw` bundles (240 function records) in the
+research corpus, with the MS level the reader assigns from in-file
+evidence and the function heading in `_extern.inf`:
+
+| Value | Records | Bundles | Functions |
+|-------|---------|---------|-----------|
+| 0x12  | 207     | 77      | Survey and MS functions, MSe low- and high-energy functions (`TOF PARENT FUNCTION`, `TOF MS FUNCTION`), lock-mass reference functions, and the fast-DDA survey function |
+| 0x10  | 31      | 8       | Every MS/MS product-ion function: the dependent functions of the 7 DDA bundles and the single `TOF MSMS FUNCTION` of PXD035818 |
+| 0x90  | 2       | 1       | Both functions of a MALDI MS/MS run (PXD005960, `MALDI TOF MSMS FUNCTION`) |
+
+0x10 differs from 0x12 in bit 1, and 0x90 is 0x10 with bit 7 set. MSe
+high-energy functions are MS2 but keep 0x12, so the type code alone does
+not give the MS level. The reader does not use this byte to decide the MS
+level.
+
 ## Scan Subtype (byte 0x001)
 
 Observed values and correlations:
@@ -94,8 +111,8 @@ Polarity cannot be confirmed from the available corpus (all positive-mode data).
 
 ## Undecoded
 
-- Exact semantics of function_type_code 0x12 (every corpus record is a TOF
-  acquisition and carries 0x12; other values need non-TOF corpus data)
+- Exact meaning of the function_type_code bits (0x12, 0x10 and 0x90 are the
+  only values seen; no non-TOF corpus data)
 - Byte 0x017 purpose (polarity vs data format flag)
 - Bytes 0x012-0x013, 0x014-0x016, 0x018-0x01B (all zero in corpus)
 - IMS-specific method parameters (wave velocity, trap bias, transfer bias) are not

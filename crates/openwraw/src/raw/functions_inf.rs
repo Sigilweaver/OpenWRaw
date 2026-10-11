@@ -14,7 +14,9 @@ pub(crate) const RECORD_SIZE: usize = 416;
 pub struct FunctionInfo {
     /// 1-based index of this function (position in the file + 1).
     pub index: u32,
-    /// Raw function type code at +0x000. Always 0x12 in known corpus.
+    /// Raw function type code at +0x000. The public corpus has 0x12 (survey,
+    /// MS, MSe and lock-mass functions), 0x10 (MS/MS product-ion functions)
+    /// and 0x90 (MALDI MS/MS functions).
     pub function_type: u8,
     /// Scan subtype byte at +0x001. Values seen in the public corpus include
     /// 0x25 and 0x71 for survey functions and 0xf1 for a lock-mass function;

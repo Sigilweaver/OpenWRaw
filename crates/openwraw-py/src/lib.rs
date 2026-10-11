@@ -275,7 +275,8 @@ impl FunctionInfo {
         self.inner.index
     }
 
-    /// Raw function type code (always 0x12 in known corpus).
+    /// Raw function type code: 0x12, 0x10 (MS/MS) or 0x90 (MALDI MS/MS) in
+    /// the public corpus.
     #[getter]
     fn function_type(&self) -> u8 {
         self.inner.function_type
