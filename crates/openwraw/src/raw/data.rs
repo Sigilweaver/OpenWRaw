@@ -30,7 +30,9 @@ impl DecodeParams {
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct Spectrum {
+    /// Calibrated m/z (Da), one per point.
     pub mz: Vec<f64>,
+    /// Intensity, one per point.
     pub intensity: Vec<f32>,
 }
 

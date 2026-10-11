@@ -7,6 +7,7 @@ use std::path::Path;
 
 /// Calibration polynomial type recorded in `Cal Function N:` lines.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum CalType {
     /// No calibration applied; raw TOF time is used unchanged.
     #[default]
@@ -17,15 +18,22 @@ pub enum CalType {
 
 /// Per-function TOF calibration polynomial from a `Cal Function N:` line.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct FunctionCal {
     /// Coefficients `[c0, c1, c2, ...]` in ascending power order.
-    /// Coefficients [c0, c1, c2, ...] in ascending power order.
     /// Default: empty (identity for T0; treated as t_raw unchanged).
     pub coeffs: Vec<f64>,
+    /// Polynomial type.
     pub cal_type: CalType,
 }
 
 impl FunctionCal {
+    /// A calibration of type `cal_type` with coefficients `coeffs` in
+    /// ascending power order.
+    pub fn new(cal_type: CalType, coeffs: Vec<f64>) -> Self {
+        Self { coeffs, cal_type }
+    }
+
     /// Apply the calibration polynomial to a raw TOF time (microseconds).
     ///
     /// Returns `t_raw` unchanged for `T0`.  Evaluates the polynomial via
@@ -46,13 +54,21 @@ impl FunctionCal {
 
 /// Parsed contents of a Waters `_HEADER.TXT` file.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct Header {
+    /// `Version` field.
     pub version: Option<String>,
+    /// `Acquired Name` field.
     pub acquired_name: Option<String>,
+    /// `Acquired Date` field, e.g. `14-Jan-2021`.
     pub acquired_date: Option<String>,
+    /// `Acquired Time` field, e.g. `16:20:52`.
     pub acquired_time: Option<String>,
+    /// `Instrument` field.
     pub instrument: Option<String>,
+    /// `User Name` field, when not empty.
     pub operator: Option<String>,
+    /// `Sample Description` field, when not empty.
     pub sample_description: Option<String>,
     /// Calibration polynomials keyed by 1-based function index.
     pub cal_functions: BTreeMap<u32, FunctionCal>,

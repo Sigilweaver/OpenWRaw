@@ -6,25 +6,19 @@
 use std::path::Path;
 
 /// Size of one function record in bytes.
-pub const RECORD_SIZE: usize = 416;
-
-/// Scan subtype byte values observed in the corpus.
-///
-/// Bit 7 (0x80) flags a lock-mass / reference function.
-pub mod subtype {
-    pub const OLDER_QTOF_SURVEY: u8 = 0x25;
-    pub const G2_SURVEY: u8 = 0x71;
-    pub const G2_LOCKMASS: u8 = 0xf1; // 0x71 | 0x80
-}
+pub(crate) const RECORD_SIZE: usize = 416;
 
 /// A single acquisition function record from `_FUNCTNS.INF`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FunctionInfo {
     /// 1-based index of this function (position in the file + 1).
     pub index: u32,
     /// Raw function type code at +0x000. Always 0x12 in known corpus.
     pub function_type: u8,
-    /// Scan subtype byte at +0x001. See `subtype` constants.
+    /// Scan subtype byte at +0x001. Values seen in the public corpus include
+    /// 0x25 and 0x71 for survey functions and 0xf1 for a lock-mass function;
+    /// bit 7 (0x80) flags a lock-mass / reference function.
     pub scan_subtype: u8,
     /// Total slot duration per scan cycle (s), `scan_time + interscan_delay`.
     /// Stored at +0x002.
@@ -52,7 +46,9 @@ impl FunctionInfo {
 
 /// Parsed contents of a `_FUNCTNS.INF` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FunctionTable {
+    /// Function records in file order.
     pub functions: Vec<FunctionInfo>,
 }
 

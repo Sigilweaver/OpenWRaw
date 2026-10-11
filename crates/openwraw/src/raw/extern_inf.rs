@@ -13,8 +13,11 @@ const E_COULOMBS: f64 = 1.602_176_6e-19;
 /// The file uses two conventions across instrument generations:
 /// `ES+` / `ES-` and `Positive` / `Negative`. Both are accepted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Polarity {
+    /// `ES+` or `Positive`.
     Positive,
+    /// `ES-` or `Negative`.
     Negative,
 }
 
@@ -25,6 +28,7 @@ pub enum Polarity {
 /// `TOF MS FUNCTION`, `TOF PARENT FUNCTION`,
 /// `TOF MSMS FUNCTION`, `TOF DAUGHTER FUNCTION`, `REFERENCE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FunctionMode {
     /// MS1 survey scan (`TOF MS`).
     Ms,
@@ -73,6 +77,7 @@ impl FunctionMode {
 /// Per-function acquisition parameters extracted from a
 /// `Function Parameters - Function N - TYPE` section.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ExternFunction {
     /// 1-based function index.
     pub index: u32,
@@ -95,6 +100,7 @@ pub struct ExternFunction {
 
 /// Parsed contents of a Waters `_extern.inf` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ExternInf {
     /// Effective TOF flight path length (mm).
     pub lteff_mm: f64,

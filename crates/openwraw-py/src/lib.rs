@@ -525,7 +525,7 @@ impl RawReader {
         out.set_item("lteff_mm", self.ext.lteff_mm)?;
         out.set_item("veff_v", self.ext.veff_v)?;
         out.set_item("pusher_interval_us", self.ext.pusher_interval_us)?;
-        out.set_item("polarity", self.polarity())?;
+        out.set_item("polarity", self.polarity()?)?;
         let functions = PyDict::new(py);
         for (index, f) in &self.ext.functions {
             let row = PyDict::new(py);
@@ -630,6 +630,11 @@ impl RawReader {
                 out.set_item("dat_offset", row.dat_offset)?;
                 out.set_item("retention_time_min", row.retention_time_min)?;
             }
+            other => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "index variant has no Python form: {other:?}"
+                )))
+            }
         }
         Ok(out)
     }
@@ -686,11 +691,17 @@ impl RawReader {
     ///
     /// Returns `"positive"`, `"negative"`, or `None` when the field is absent.
     #[getter]
-    fn polarity(&self) -> Option<&'static str> {
-        self.ext.polarity.map(|p| match p {
-            Polarity::Positive => "positive",
-            Polarity::Negative => "negative",
-        })
+    fn polarity(&self) -> PyResult<Option<&'static str>> {
+        self.ext
+            .polarity
+            .map(|p| match p {
+                Polarity::Positive => Ok("positive"),
+                Polarity::Negative => Ok("negative"),
+                other => Err(PyRuntimeError::new_err(format!(
+                    "polarity {other:?} has no Python name"
+                ))),
+            })
+            .transpose()
     }
 
     /// List of all acquisition functions in this .raw file.
@@ -762,16 +773,10 @@ impl RawReader {
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn retention_time(&self, func_index: u32, scan_index: usize) -> PyResult<f32> {
-        match &self.function(func_index)?.scan_index {
-            ScanIndex::A(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-            ScanIndex::B(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-        }
+        self.function(func_index)?
+            .scan_index
+            .retention_time_min(scan_index)
+            .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range")))
     }
 
     /// Decode one scan as calibrated m/z and intensity.

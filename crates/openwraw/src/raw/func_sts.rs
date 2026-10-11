@@ -17,10 +17,15 @@ const NAME_LEN: usize = DESCRIPTOR_SIZE - 6;
 
 /// One channel's encoding, as recorded in a descriptor record's type field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChannelEncoding {
+    /// Type code 0: unsigned 8-bit integer.
     U8,
+    /// Type code 1: signed 16-bit little-endian integer.
     I16,
+    /// Type code 2: unsigned 32-bit little-endian integer.
     U32,
+    /// Type code 3: 32-bit little-endian float.
     F32,
 }
 
@@ -36,14 +41,25 @@ impl ChannelEncoding {
             ))),
         }
     }
+
+    /// Bytes one value occupies in a scan record.
+    fn width(self) -> usize {
+        match self {
+            Self::U8 => 1,
+            Self::I16 => 2,
+            Self::U32 | Self::F32 => 4,
+        }
+    }
 }
 
 /// One channel descriptor: name, encoding, and byte offset within each
 /// per-scan record.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChannelDescriptor {
     /// Channel sequence number (not always contiguous; some skip).
     pub seq: u16,
+    /// Value type of this channel.
     pub encoding: ChannelEncoding,
     /// Byte offset of this channel's value within each scan record.
     pub offset: usize,
@@ -122,6 +138,16 @@ impl FuncSts {
                 "_FUNCnnn.STS: scan_record_size is zero".to_owned(),
             ));
         }
+        if let Some(d) = descriptors
+            .iter()
+            .find(|d| d.offset + d.encoding.width() > scan_record_size)
+        {
+            return Err(crate::Error::Parse(format!(
+                "_FUNCnnn.STS: channel {} ({}) at offset {} does not fit in the \
+                 {scan_record_size}-byte scan record",
+                d.seq, d.name, d.offset
+            )));
+        }
         let remaining = bytes.len() - data_offset;
         let n_scans = remaining / scan_record_size;
         let data = bytes[data_offset..data_offset + n_scans * scan_record_size].to_vec();
@@ -152,10 +178,10 @@ impl FuncSts {
     /// Decode one channel's value for a given 0-based scan index.
     ///
     /// Returns `None` if `scan_idx` is out of range for the parsed data
-    /// section; corrupt/truncated numeric reads are surfaced as `None` too,
-    /// since a housekeeping channel failing to decode shouldn't abort
-    /// spectrum construction (unlike the mass-defining primary DAT/IDX
-    /// parsers, which do return `Result`).
+    /// section. Parsing checks that every channel of this file fits in the
+    /// scan record, so a descriptor from [`FuncSts::channels`] always
+    /// decodes; `None` is also returned for a descriptor from another file
+    /// that lies outside this file's scan record.
     pub fn value_at(&self, desc: &ChannelDescriptor, scan_idx: usize) -> Option<f64> {
         if scan_idx >= self.n_scans {
             return None;
@@ -230,6 +256,17 @@ mod tests {
         assert_eq!(ce.seq, 62);
         assert!((sts.value_at(ce, 0).unwrap() - 10.0).abs() < 1e-6);
         assert!((sts.value_at(ce, 1).unwrap() - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn channel_outside_scan_record_is_error() {
+        // An f32 at offset 2 needs bytes 2..6 of a 4-byte record.
+        let mut bytes = make_preamble(32 + 48, 4, 1);
+        bytes.extend(make_descriptor(62, 3, 2, "Collision Energy"));
+        bytes.extend(4.0f32.to_le_bytes());
+
+        let err = FuncSts::from_bytes(&bytes).unwrap_err();
+        assert!(err.to_string().contains("does not fit"), "{err}");
     }
 
     #[test]

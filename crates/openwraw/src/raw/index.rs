@@ -6,18 +6,20 @@
 use std::path::Path;
 
 /// Record stride for Variant A (non-IMS / simple TOF-MS).
-pub const STRIDE_A: usize = 22;
+pub(crate) const STRIDE_A: usize = 22;
 /// Record stride for Variant B (SYNAPT G2-S and later, Xevo G2-XS and G3).
-pub const STRIDE_B: usize = 30;
+pub(crate) const STRIDE_B: usize = 30;
 
-/// Constant upper-16-bit marker in the Variant A +0x04 packed field.
-/// Value 0x1800 identifies the DAT encoding format for this scan.
-pub const VARIANT_A_TYPE_MARKER: u32 = 0x1800;
+/// Upper 16 bits of the Variant A +0x04 packed field in the 6-byte and
+/// 8-byte record families; used to build test records.
+#[cfg(test)]
+const VARIANT_A_TYPE_MARKER: u32 = 0x1800;
 
 /// A scan index record from a Variant A (`_FUNCnnn.IDX`, 22-byte stride).
 ///
 /// Observed in non-IMS Q-TOF instruments (PXD058812).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ScanIndexA {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.
     pub dat_offset: u32,
@@ -36,6 +38,7 @@ pub struct ScanIndexA {
 /// has no record count, so the DAT record width is judged from the data by
 /// the reader.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ScanIndexB {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.
     ///
@@ -49,8 +52,11 @@ pub struct ScanIndexB {
 
 /// Parsed index from a `_FUNCnnn.IDX` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ScanIndex {
+    /// 22-byte records.
     A(Vec<ScanIndexA>),
+    /// 30-byte records.
     B(Vec<ScanIndexB>),
 }
 
@@ -116,6 +122,15 @@ impl ScanIndex {
         match self {
             ScanIndex::A(v) => v.len(),
             ScanIndex::B(v) => v.len(),
+        }
+    }
+
+    /// Retention time (minutes) of the `scan_idx`-th scan (0-based), or
+    /// `None` when the index has no such scan.
+    pub fn retention_time_min(&self, scan_idx: usize) -> Option<f32> {
+        match self {
+            ScanIndex::A(v) => v.get(scan_idx).map(|r| r.retention_time_min),
+            ScanIndex::B(v) => v.get(scan_idx).map(|r| r.retention_time_min),
         }
     }
 

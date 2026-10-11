@@ -18,6 +18,7 @@ const CHRO_DATA_OFFSET: usize = 128;
 
 /// Description of a single recorded chromatographic channel from `_CHROMS.INF`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChromChannel {
     /// 0-based index among channel records.
     pub index: usize,
@@ -33,7 +34,9 @@ pub struct ChromChannel {
 
 /// Parsed contents of a `_CHROMS.INF` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChromsInf {
+    /// Channel records in file order.
     pub channels: Vec<ChromChannel>,
 }
 
@@ -130,6 +133,7 @@ impl ChromsInf {
 
 /// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct ChromPoint {
     /// Retention time in minutes.
     pub rt_min: f32,

@@ -134,10 +134,16 @@ impl FunctionEntry {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Reader {
+    /// The bundle directory passed to [`Reader::open`].
     pub dir: PathBuf,
+    /// Directory name of the bundle, e.g. `sample.raw`.
     pub bundle_name: String,
+    /// Parsed `_HEADER.TXT`.
     pub header: Header,
+    /// Parsed `_extern.inf`.
     pub extern_inf: ExternInf,
+    /// Functions whose `_FUNCnnn.IDX` and `_FUNCnnn.DAT` are both present,
+    /// in `_FUNCTNS.INF` order, lock-mass functions included.
     pub functions: Vec<FunctionEntry>,
 }
 
@@ -536,9 +542,11 @@ fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DecodedScan {
+    /// 1-based function index.
     pub function_index: u32,
     /// 0-based position within the function.
     pub scan_idx: usize,
+    /// Retention time (minutes) from `_FUNCnnn.IDX`.
     pub retention_time_min: f32,
     /// Calibrated m/z and intensity. Ion mobility is not decoded.
     pub spectrum: Spectrum,
