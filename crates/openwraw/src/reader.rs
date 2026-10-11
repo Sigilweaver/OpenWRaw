@@ -22,7 +22,7 @@ use crate::raw::data::{
     decode_encoding_a, decode_encoding_d, decode_encoding_e, variant_b_record_width, DecodeParams,
     Spectrum,
 };
-use crate::raw::extern_inf::ExternInf;
+use crate::raw::extern_inf::{ExternInf, FunctionMode};
 use crate::raw::func_sts::FuncSts;
 use crate::raw::functions_inf::{FunctionInfo, FunctionTable};
 use crate::raw::header::{FunctionCal, Header};
@@ -303,6 +303,85 @@ impl Reader {
             .sum()
     }
 
+    /// MS level of a function (1-based `function_index`), from in-file
+    /// evidence.
+    ///
+    /// Rules, in order:
+    ///
+    /// 1. `_extern.inf` section labelled `REFERENCE`: MS1.
+    /// 2. Labelled `TOF MSMS` or `TOF DAUGHTER`: MS2.
+    /// 3. Labelled `TOF MS`: MS2 when the section records a collision-energy
+    ///    ramp ([`ExternFunction::collision_energy_ramp_ev`]) and another
+    ///    non-lock-mass `TOF MS` function of the same bundle records none.
+    ///    This is the high-energy function of an MSe acquisition whose
+    ///    header does not say `TOF PARENT`. Otherwise MS1.
+    /// 4. Anything else (`TOF PARENT`, `TOF SURVEY`, `MOBILITY SURVEY`,
+    ///    unlabelled): function 1, or the only function, is MS1; any other
+    ///    function is MS2.
+    ///
+    /// [`ExternFunction::collision_energy_ramp_ev`]: crate::raw::extern_inf::ExternFunction::collision_energy_ramp_ev
+    pub fn ms_level(&self, function_index: u32) -> u32 {
+        if let Some(f) = self.extern_inf.functions.get(&function_index) {
+            match f.mode {
+                FunctionMode::Reference => return 1,
+                FunctionMode::Msms | FunctionMode::Daughter => return 2,
+                FunctionMode::Ms => {
+                    return if f.collision_energy_ramp_ev.is_some()
+                        && self.has_unramped_ms_partner(function_index)
+                    {
+                        2
+                    } else {
+                        1
+                    };
+                }
+                _ => {}
+            }
+        }
+        if function_index == 1 || self.functions.len() == 1 {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Whether another non-lock-mass function labelled `TOF MS` records no
+    /// collision-energy ramp (the low-energy half of an MSe pair).
+    fn has_unramped_ms_partner(&self, function_index: u32) -> bool {
+        self.functions.iter().any(|entry| {
+            entry.index != function_index
+                && !entry.info.is_lock_mass()
+                && self
+                    .extern_inf
+                    .functions
+                    .get(&entry.index)
+                    .is_some_and(|f| {
+                        f.mode == FunctionMode::Ms && f.collision_energy_ramp_ev.is_none()
+                    })
+        })
+    }
+
+    /// Precursor m/z of one scan (1-based `function_index`, 0-based
+    /// `scan_idx`), or `None` when the bundle records none.
+    ///
+    /// Taken from the scan's "Set Mass" channel in `_FUNCnnn.STS`, which
+    /// holds each data-dependent (DDA) MS/MS scan's precursor, and otherwise
+    /// from the function's `Set Mass` in `_extern.inf` (targeted MS/MS
+    /// without an STS file). A stored 0 in either place means no precursor
+    /// and gives `None`. MS1 and MSe functions have no precursor.
+    pub fn precursor_mz(&self, function_index: u32, scan_idx: usize) -> Option<f64> {
+        self.functions
+            .iter()
+            .find(|f| f.index == function_index)
+            .and_then(|entry| entry.sts.as_ref())
+            .and_then(|sts| sts.set_mass(scan_idx))
+            .or_else(|| {
+                self.extern_inf
+                    .functions
+                    .get(&function_index)
+                    .and_then(|f| f.set_mass_da)
+            })
+    }
+
     /// Decode the `i`-th scan (0-based) of the given function.
     pub fn decode_scan(&self, function_index: u32, scan_idx: usize) -> crate::Result<DecodedScan> {
         self.decode_scan_inner(function_index, scan_idx)
@@ -360,6 +439,7 @@ impl Reader {
             .sts
             .as_ref()
             .and_then(|sts| sts.etd_fragmentation_mode(scan_idx));
+        let precursor_mz = self.precursor_mz(function_index, scan_idx);
         Ok(DecodedScan {
             function_index,
             scan_idx,
@@ -367,6 +447,7 @@ impl Reader {
             spectrum,
             collision_energy_ev,
             etd_fragmentation_mode,
+            precursor_mz,
         })
     }
 
@@ -557,6 +638,9 @@ pub struct DecodedScan {
     /// Fragmentation Mode" channel (seq 121): `0` for CID, non-zero for
     /// ETD, `None` when the file is absent or doesn't define the channel.
     pub etd_fragmentation_mode: Option<f64>,
+    /// Precursor m/z, from [`Reader::precursor_mz`]. `None` for MS1 and
+    /// MSe scans and wherever the bundle stores no precursor.
+    pub precursor_mz: Option<f64>,
 }
 
 /// Resolve the byte slice for scan `scan_idx` within `entry`'s DAT file.

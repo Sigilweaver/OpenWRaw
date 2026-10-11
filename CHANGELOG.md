@@ -13,9 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ScanIndex::retention_time_min(scan_idx)`.
 - `From<openwraw::Error> for openmassspec_core::Error`, which wraps the
   error as `openmassspec_core::Error::Vendor`.
+- `Reader::ms_level(function)`, `Reader::precursor_mz(function, scan)`,
+  `DecodedScan::precursor_mz`, `FuncSts::set_mass(scan)` and
+  `ExternFunction::collision_energy_ramp_ev`. Python
+  `RawReader.scan_parameters` returns `precursor_mz`.
 
 ### Fixed
 
+- Data-dependent (DDA) MS/MS spectra report each scan's precursor m/z from
+  the `_FUNCnnn.STS` "Set Mass" channel. Their `_extern.inf` sections store
+  `Set Mass 0.0`, which was written as precursor m/z 0.000000 on every
+  MS/MS spectrum: 19,268 spectra in 5 public bundles (PXD003126,
+  PXD029515, PXD041695 x2, PXD073126). Three more DDA bundles (PXD001123,
+  PXD010569 x2) reported one fixed method value per function (for example
+  1388.0) instead of each scan's precursor: 2,537 spectra. A stored set
+  mass of 0 is now treated as absent everywhere
+  (`ExternFunction::set_mass_da` is `None`). The precursor m/z is written
+  as both isolation window target m/z and selected ion m/z; before, only
+  the target was written.
+- The high-energy function of an MSe acquisition whose `_extern.inf`
+  section is labelled `TOF MS FUNCTION` is reported as MS2 when the section
+  records a collision-energy ramp and another `TOF MS` function of the
+  bundle records none. It was reported as MS1. Affects 3 public bundles
+  (PXD009047, PXD078353 x2; 5,401 spectra). Vion bundles exported by UNIFI
+  record no collision energy and still report both functions as MS1.
+- Python `RawReader.ms_level` uses the same rule as the records. It
+  returned 1 for DDA MS/MS functions and 2 for the low-energy `TOF PARENT`
+  function of MSe bundles.
 - Variant B `_FUNCnnn.IDX` DAT offsets are read as 64 bits (low word at
   +0x16, high word at +0x1A). Scans past 4 GiB in a `_FUNCnnn.DAT` decoded
   bytes from the start of the file, and the scan before them came back

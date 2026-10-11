@@ -1,8 +1,8 @@
-// Parser for _CHROMS.INF and _CHROnnnn.DAT files.
+// Parser for _CHROMS.INF and _CHROnnn.DAT files.
 //
 // _CHROMS.INF describes each recorded instrument channel (pump pressure,
 // flow rate, temperature, etc.) with source type, name, scale factor and units.
-// _CHROnnnn.DAT holds the corresponding (RT, value) time-series for that channel.
+// _CHROnnn.DAT holds the corresponding (RT, value) time-series for that channel.
 
 use std::path::Path;
 
@@ -131,7 +131,7 @@ impl ChromsInf {
     }
 }
 
-/// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
+/// A single (retention-time, value) sample from a `_CHROnnn.DAT` file.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct ChromPoint {
@@ -141,7 +141,7 @@ pub struct ChromPoint {
     pub value: f32,
 }
 
-/// Read all (RT, value) samples from a `_CHROnnnn.DAT` file.
+/// Read all (RT, value) samples from a `_CHROnnn.DAT` file.
 pub fn read_chro_dat(path: &Path) -> crate::Result<Vec<ChromPoint>> {
     let bytes = std::fs::read(path)?;
     parse_chro_bytes(&bytes)
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(ci.channels[0].units, "\u{00B5}L/min"); // µL/min
     }
 
-    // -- _CHROnnnn.DAT tests --
+    // -- _CHROnnn.DAT tests --
 
     fn make_chro_dat(points: &[(f32, f32)]) -> Vec<u8> {
         let mut bytes = vec![0u8; CHRO_DATA_OFFSET];

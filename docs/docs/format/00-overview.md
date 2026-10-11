@@ -18,7 +18,7 @@ method, calibration state, and all acquired spectra.
 | `_FUNCnnn.DAT` | Binary | Partially decoded | Packed spectrum data (3 encodings; see below). Ion mobility not decoded |
 | `_FUNCnnn.STS` | Binary | **Fully decoded** | Per-scan instrument statistics (voltages, TIC, push count) |
 | `_CHROMS.INF` | Binary | **Fully decoded** | LC channel descriptor table |
-| `_CHROnnnn.DAT` | Binary | **Fully decoded** | LC channel time-series data (f32 RT + f32 value) |
+| `_CHROnnn.DAT` | Binary | **Fully decoded** | LC channel time-series data (f32 RT + f32 value) |
 | `_extern.inf` | ASCII | **Fully known** | Instrument geometry constants (Lteff, Veff, pusher period) |
 | `_INLET.INF` | ASCII text | **Fully known** | ACE inlet method record (LC runs only) |
 | `_HISTORY.INF` | Binary | Partially decoded | Waters PT with 0 descriptors; data opaque |
@@ -39,6 +39,7 @@ typical experiment structure:
 | MS survey only | Function 1 = MS1 |
 | MSe / HDMSe (broadband) | Function 1 = low-energy, Function 2 = high-energy (both `TOF PARENT FUNCTION`, `Precursor Selection: Everything` - no discrete precursor) |
 | Targeted MS/MS | Function 1 = `TOF MSMS FUNCTION` with a fixed `Set Mass` (single precursor per acquisition, not survey-triggered) |
+| DDA | Function 1 = MS1 survey (`TOF SURVEY FUNCTION` / `MOBILITY FAST DDA FUNCTION`), functions 2..N = MS/MS slots, one per precursor of a survey cycle; per-scan precursor in `_FUNCnnn.STS` "Set Mass" |
 | IMS-MS (HDMS) | Function 1 = IMS-MS, Function 2 = reference/lock-mass |
 | Lock-mass reference | Last function = calibrant channel |
 
@@ -46,10 +47,10 @@ An MRM experiment (triple-quadrupole) would have one function per
 precursor/product pair. MRM data is rare in public repositories and
 this format variant has not yet been observed in corpus data.
 
-The corpus's one targeted-MS/MS sample so far (PXD035818, single
-"TOF MSMS FUNCTION" per file) is a fixed-precursor direct-infusion
-acquisition, not a classic multi-function survey-then-trigger DDA method;
-no real sample of the latter has been found yet either (Sigilweaver/OpenWRaw#13).
+The corpus's targeted-MS/MS sample (PXD035818, single "TOF MSMS FUNCTION"
+per file) is a fixed-precursor direct-infusion acquisition. Survey-triggered
+DDA bundles are PXD001123, PXD003126, PXD010569 (2), PXD029515, PXD041695
+(2) and PXD073126 (mobility DDA).
 
 ## DAT Encoding Variants
 
@@ -97,7 +98,7 @@ only; where drift time is stored is unresolved (see `_FUNCnnn.DAT`).
 
 ## Waters Parameter Table Format
 
-Several binary files (`_CHROMS.INF`, `_FUNCnnn.STS`, `_CHROnnnn.DAT`) share
+Several binary files (`_CHROMS.INF`, `_FUNCnnn.STS`, `_CHROnnn.DAT`) share
 a common "parameter table" structure:
 
 ```
@@ -147,6 +148,6 @@ Its descriptor count is not a count of records to skip after the header.
 - [05 - _CHROMS.INF](05-chroms-inf.md)
 - [06 - _extern.inf](06-extern-inf.md)
 - [07 - _FUNCnnn.STS](07-func-sts.md)
-- [08 - _CHROnnnn.DAT](08-chro-dat.md)
+- [08 - _CHROnnn.DAT](08-chro-dat.md)
 - [09 - _PROCnnn files](09-proc-files.md)
 - [10 - _INLET.INF / _HISTORY.INF](10-aux-files.md)

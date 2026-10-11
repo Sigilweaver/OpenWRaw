@@ -209,6 +209,18 @@ impl FuncSts {
         self.value_at(desc, scan_idx)
     }
 
+    /// Per-scan precursor set mass (m/z) from the "Set Mass" channel
+    /// (seq 77), when this function's STS file records that channel and the
+    /// value is positive.
+    ///
+    /// MS1 and lock-mass functions store 0 in this channel; a stored 0 is
+    /// returned as `None`, never as m/z 0.
+    pub fn set_mass(&self, scan_idx: usize) -> Option<f64> {
+        let desc = self.channel("Set Mass")?;
+        self.value_at(desc, scan_idx)
+            .filter(|v| v.is_finite() && *v > 0.0)
+    }
+
     /// Per-scan ETD Fragmentation Mode (seq 121), if this function's STS
     /// file records that channel: `0` for CID, non-zero for ETD.
     pub fn etd_fragmentation_mode(&self, scan_idx: usize) -> Option<f64> {

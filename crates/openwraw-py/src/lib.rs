@@ -403,7 +403,7 @@ impl ChromChannel {
 
 // -- ChromPoint --
 
-/// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
+/// A single (retention-time, value) sample from a `_CHROnnn.DAT` file.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct ChromPoint {
@@ -539,7 +539,9 @@ impl RawReader {
         Ok(out)
     }
 
-    /// Collision energy and ETD mode decoded for a scan from `_FUNCnnn.STS`.
+    /// Collision energy, ETD mode and precursor m/z decoded for a scan
+    /// (`_FUNCnnn.STS`, with the `_extern.inf` set mass as the precursor
+    /// fallback). Values the bundle does not record are `None`.
     fn scan_parameters<'py>(
         &self,
         py: Python<'py>,
@@ -553,6 +555,7 @@ impl RawReader {
         let out = PyDict::new(py);
         out.set_item("collision_energy_ev", scan.collision_energy_ev)?;
         out.set_item("etd_fragmentation_mode", scan.etd_fragmentation_mode)?;
+        out.set_item("precursor_mz", scan.precursor_mz)?;
         Ok(out)
     }
 
@@ -737,15 +740,11 @@ impl RawReader {
 
     /// MS level for a function (1-based `func_index`).
     ///
-    /// Returns `1` for MS1 survey and reference functions, `2` for MSe/DDA/MS2
-    /// functions. Falls back to `1` when the function is not described in
-    /// `_extern.inf`.
+    /// Returns `1` for MS1 survey and reference functions, `2` for MSe
+    /// high-energy, DDA and targeted MS/MS functions. Same rule as the
+    /// `ms_level` of the records this reader yields.
     fn ms_level(&self, func_index: u32) -> u32 {
-        self.ext
-            .functions
-            .get(&func_index)
-            .map(|f| f.mode.ms_level())
-            .unwrap_or(1)
+        self.reader.ms_level(func_index)
     }
 
     /// Number of scans in a function (1-based `func_index`).

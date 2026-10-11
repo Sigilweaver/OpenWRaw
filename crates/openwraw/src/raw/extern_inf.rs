@@ -45,10 +45,14 @@ pub enum FunctionMode {
 }
 
 impl FunctionMode {
-    /// MS level conventionally written to mzML for this mode.
+    /// MS level implied by the section label alone.
     ///
-    /// `Ms` and `Reference` are MS1; everything else is MS2 (MSe / DDA /
-    /// targeted MS/MS all carry fragment ions in mzML semantics).
+    /// `Ms`, `Reference` and `Unknown` are MS1; `MseParent`, `Msms` and
+    /// `Daughter` are MS2. The label is not enough on its own: MSe bundles
+    /// label both the low- and high-energy functions `TOF PARENT` (or both
+    /// `TOF MS`). [`crate::Reader::ms_level`] combines the label with the
+    /// function's collision-energy settings and position, and is the level
+    /// written to spectrum records.
     pub fn ms_level(self) -> u32 {
         match self {
             Self::Ms | Self::Reference | Self::Unknown => 1,
@@ -86,16 +90,26 @@ pub struct ExternFunction {
     pub pusher_interval_us: Option<f64>,
     /// Acquisition mode derived from the section-header tail.
     pub mode: FunctionMode,
-    /// Targeted precursor m/z from the `Set Mass` field (Da).
+    /// Precursor m/z from the section's `Set Mass` field (Da).
     ///
-    /// Only present for `TOF MSMS FUNCTION` / `TOF DAUGHTER FUNCTION`
-    /// sections (`FunctionMode::Msms` / `Daughter`) - confirmed against two
-    /// real targeted-MS/MS corpus samples (Sigilweaver/OpenWRaw#13:
-    /// PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw,
-    /// PXD035818/18122020_PEP101_2.raw). `TOF PARENT FUNCTION` (MSe/HDMSe)
-    /// sections never have this field - broadband fragmentation of
-    /// `Precursor Selection: Everything` has no discrete precursor to set.
+    /// `None` when the field is absent or not a positive number. MS/MS
+    /// functions carry this field; MSe/HDMSe (`TOF PARENT FUNCTION`) and
+    /// MS1 sections do not. Data-dependent (DDA) MS/MS functions store
+    /// `Set Mass 0.0` here because the precursor changes from scan to scan;
+    /// a stored 0 is therefore treated as absent, never as m/z 0. The
+    /// per-scan precursor of those functions is in `_FUNCnnn.STS` (see
+    /// [`crate::Reader::precursor_mz`]).
     pub set_mass_da: Option<f64>,
+    /// Collision-energy ramp `(start, end)` in eV recorded in this
+    /// function's section, when it records one with `end > start`.
+    ///
+    /// Read from a `... Collision Energy Ramp Start` / `... Ramp End` pair,
+    /// a `... Collision Energy Low` / `... High` pair, or a single
+    /// `... Collision Energy (eV)  <start> (Ramping to <end>)` line.
+    /// Used to recognise the high-energy function of an MSe acquisition
+    /// whose section header says `TOF MS FUNCTION` (see
+    /// [`crate::Reader::ms_level`]).
+    pub collision_energy_ramp_ev: Option<(f64, f64)>,
 }
 
 /// Parsed contents of a Waters `_extern.inf` file.
@@ -163,6 +177,8 @@ impl std::str::FromStr for ExternInf {
         let mut current_func: Option<u32> = None;
         let mut functions: BTreeMap<u32, ExternFunction> = BTreeMap::new();
         let mut polarity: Option<Polarity> = None;
+        // Collision-energy ramp bounds per function, (start, end) in eV.
+        let mut ramps: BTreeMap<u32, (Option<f64>, Option<f64>)> = BTreeMap::new();
 
         for line in s.lines() {
             let trimmed = line.trim();
@@ -185,6 +201,7 @@ impl std::str::FromStr for ExternInf {
                         pusher_interval_us: None,
                         mode,
                         set_mass_da: None,
+                        collision_energy_ramp_ev: None,
                     });
                 }
                 continue;
@@ -197,6 +214,13 @@ impl std::str::FromStr for ExternInf {
                 if trimmed.starts_with("Instrument") || !trimmed.contains("Function") {
                     current_func = None;
                 }
+                continue;
+            }
+
+            // `Using Auto Transfer MS Collision Energy (eV)  15.0000 (Ramping to 25.0000)`
+            // carries both ramp bounds on one line.
+            if let (Some(n), Some((start, end))) = (current_func, parse_ramping_to(trimmed)) {
+                ramps.insert(n, (Some(start), Some(end)));
                 continue;
             }
 
@@ -244,10 +268,27 @@ impl std::str::FromStr for ExternInf {
                     }
                 }
                 "Set Mass" => {
+                    // DDA MS/MS functions store 0: no fixed precursor.
                     if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
                         if let Some(f) = functions.get_mut(&n) {
-                            f.set_mass_da = Some(v);
+                            f.set_mass_da = (v.is_finite() && v > 0.0).then_some(v);
                         }
+                    }
+                }
+                k if current_func.is_some()
+                    && (k.ends_with("Collision Energy Ramp Start")
+                        || k.ends_with("Collision Energy Low")) =>
+                {
+                    if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
+                        ramps.entry(n).or_default().0 = Some(v);
+                    }
+                }
+                k if current_func.is_some()
+                    && (k.ends_with("Collision Energy Ramp End")
+                        || k.ends_with("Collision Energy High")) =>
+                {
+                    if let (Some(n), Ok(v)) = (current_func, value_str.parse::<f64>()) {
+                        ramps.entry(n).or_default().1 = Some(v);
                     }
                 }
                 "Polarity" => {
@@ -260,6 +301,14 @@ impl std::str::FromStr for ExternInf {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        for (n, bounds) in ramps {
+            if let (Some(f), (Some(start), Some(end))) = (functions.get_mut(&n), bounds) {
+                if start.is_finite() && end.is_finite() && end > start {
+                    f.collision_energy_ramp_ev = Some((start, end));
+                }
             }
         }
 
@@ -283,6 +332,23 @@ impl std::str::FromStr for ExternInf {
             functions,
         })
     }
+}
+
+/// Parse `<key> <start> (Ramping to <end>)`, as written by MassLynx in a
+/// collision-energy line, into `(start, end)`.
+fn parse_ramping_to(line: &str) -> Option<(f64, f64)> {
+    if !line.contains("Collision Energy") {
+        return None;
+    }
+    let (head, tail) = line.split_once("(Ramping to")?;
+    let start = head.split_whitespace().last()?.parse::<f64>().ok()?;
+    let end = tail
+        .trim()
+        .trim_end_matches(')')
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    Some((start, end))
 }
 
 #[cfg(test)]
@@ -508,6 +574,43 @@ MSMS End Mass\t2000.0\r\n\
         assert_eq!(f1.mode, FunctionMode::Msms);
         let mz = f1.set_mass_da.expect("Set Mass missing");
         assert!((mz - 884.9).abs() < 1e-6, "Set Mass = {mz}, expected 884.9");
+    }
+
+    #[test]
+    fn zero_set_mass_is_absent() {
+        let ext: ExternInf = "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 2 - TOF SURVEY FUNCTION\n\
+             Set Mass\t\t\t\t0.0\n"
+            .parse()
+            .unwrap();
+        assert_eq!(ext.functions[&2].set_mass_da, None);
+    }
+
+    #[test]
+    fn collision_energy_ramp_forms() {
+        let ext: ExternInf = "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 1 - TOF MS FUNCTION\n\
+             Using Auto Transfer MS Collision Energy (eV) \t4.0000\n\
+             Function Parameters - Function 2 - TOF MS FUNCTION\n\
+             Transfer Collision Energy Ramp Start (eV)\t27.0\n\
+             Transfer Collision Energy Ramp End (eV)\t\t50.0\n\
+             Function Parameters - Function 3 - TOF MS FUNCTION\n\
+             Using Auto Transfer MS Collision Energy (eV) \t15.0000 (Ramping to 25.0000)\n\
+             Function Parameters - Function 4 - TOF PARENT FUNCTION\n\
+             Transfer MS Collision Energy Low (eV)\t25.0\n\
+             Transfer MS Collision Energy High (eV)\t55.0\n\
+             Function Parameters - Function 5 - MOBILITY SURVEY FUNCTION\n\
+             Transfer MSMS Collision Energy Ramp Start (eV)\t0.0\n\
+             Transfer MSMS Collision Energy Ramp End (eV)\t0.0\n\
+             Transfer MSMS Collision Energy Low Mass (Da)\t50.0\n"
+            .parse()
+            .unwrap();
+        let ramp = |n: u32| ext.functions[&n].collision_energy_ramp_ev;
+        assert_eq!(ramp(1), None);
+        assert_eq!(ramp(2), Some((27.0, 50.0)));
+        assert_eq!(ramp(3), Some((15.0, 25.0)));
+        assert_eq!(ramp(4), Some((25.0, 55.0)));
+        assert_eq!(ramp(5), None, "0 to 0 eV is no ramp");
     }
 
     #[test]
