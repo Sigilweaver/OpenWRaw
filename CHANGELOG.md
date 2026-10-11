@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-11
+
 ### Added
 
 - `FunctionCal::new(cal_type, coeffs)` and
@@ -82,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FuncSts::from_bytes` rejects a `_FUNCnnn.STS` channel that does not fit
   in the scan record, instead of `FuncSts::value_at` returning `None` for
   it.
+- Accept valid 213-byte, one-channel `_CHROMS.INF` files and preserve the
+  first two channels in larger files. Field descriptors are inside the
+  128-byte header; channel 0 now correctly maps to `_CHRO001.DAT`.
+  Reproduced from original public Waters acquisitions without vendor software
+  (issue #36).
+- Decode 12-byte LCT Premier mass records from original public MTBLS701 and
+  MTBLS13770 acquisitions as Encoding E instead of 6-byte Encoding A.
+  Intensity flags and the auxiliary word remain uninterpreted; flagged peaks
+  are preserved.
 
 ### Changed
 
@@ -135,27 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `functions_inf::subtype` module (`OLDER_QTOF_SURVEY`, `G2_SURVEY`,
   `G2_LOCKMASS`) and `index::VARIANT_A_TYPE_MARKER` are removed; the
   `FunctionInfo::scan_subtype` docs list the observed values.
-
-## [4.0.0] - 2026-10-04
-
-### Fixed
-
-- Accept valid 213-byte, one-channel `_CHROMS.INF` files and preserve the
-  first two channels in larger files. Field descriptors are inside the
-  128-byte header; channel 0 now correctly maps to `_CHRO001.DAT`.
-  Reproduced from original public Waters acquisitions without vendor software
-  (issue #36).
-- Decode 12-byte LCT Premier mass records from original public MTBLS701 and
-  MTBLS13770 acquisitions instead of treating them as 6-byte Encoding A.
-  Intensity flags and the auxiliary word remain uninterpreted; flagged peaks
-  are preserved.
-
-### Changed
-
-- **Breaking (Rust):** public `Encoding` adds variant `E`; downstream
-  exhaustive matches must handle it. This requires a major crate release.
-  The Python package shares version 4.0.0, with an additive encoding value.
-  Python `function_encoding` can return `"e"` for 12-byte LCT records.
 
 ### Known limitations
 
