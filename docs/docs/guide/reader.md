@@ -4,10 +4,11 @@ sidebar_position: 1
 
 # Reader
 
-Loading a `.raw` directory parses the metadata files
-(`_HEADER.TXT`, `_extern.inf`, `_FUNCTNS.INF`, `_CHROMS.INF`) and
-indexes every MS function and chromatogram. Spectrum data is read on
-demand from the corresponding `_FUNCnnn.DAT` files.
+`Reader::open` parses `_HEADER.TXT`, `_extern.inf` and `_FUNCTNS.INF`,
+and for every MS function its `_FUNCnnn.IDX` scan index and, when present,
+its `_FUNCnnn.STS` scan statistics. It does not read `_CHROMS.INF` or the
+`_CHROnnn.DAT` files. Spectrum data is read on demand from the
+corresponding `_FUNCnnn.DAT` files.
 
 ```rust
 use openwraw::Reader;
@@ -25,7 +26,14 @@ Public types live under `openwraw::raw`:
 | `functions_inf` | `_FUNCTNS.INF` - function descriptors         |
 | `index`         | `_FUNCnnn.IDX` - scan index (Variant A / B)   |
 | `data`          | `_FUNCnnn.DAT` - spectrum decoders            |
-| `chroms`        | `_CHROMS.INF` + `_CHROnnnn.DAT`                |
+| `chroms`        | `_CHROMS.INF` + `_CHROnnn.DAT`                |
+
+`Reader::ms_level(function)` gives a function's MS level and
+`Reader::precursor_mz(function, scan)` a scan's precursor m/z (`None` for
+MS1 and MSe scans, and wherever the bundle stores none). The rules and
+their in-file evidence are in the format notes for
+[`_extern.inf`](../format/extern-inf) and
+[`_FUNCnnn.STS`](../format/func-sts).
 
 The high-level `Reader` glues functions and their spectrum data together;
 chromatogram channels are a separate concern accessed directly through the
