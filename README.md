@@ -73,24 +73,40 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
-## Known issues
+## Known issues and gaps
 
-- **No ion mobility decoding.** SYNAPT scans are returned as m/z and
-  intensity only. There is no drift-time output, and mzML output carries no
-  mobility arrays.
-- **No lock-mass correction.** m/z uses only the calibration stored in
-  `_HEADER.TXT`. Lock-mass functions are skipped when iterating spectra and
-  are not used to correct the others. Across the public test corpus the
-  uncorrected lock-mass reference sits within about 75 ppm for most
-  bundles. Three lock-mass functions exceed the 100 ppm audit gate:
-  PXD001175 `S121126_06.raw` (+162 ppm), PXD069628 `HC20_CE` (-108 ppm)
-  and PXD029515 `blast_young_0h_H1__MSMS.raw` (-153 ppm). Their offsets are
-  uniform across the reference peak and its isotopes; the cause is not
-  established.
-- Encoding E (12-byte records) intensity flag bits and auxiliary word are
-  not interpreted; flagged peaks are kept. Encoding E spectra are labelled
-  centroid. That is confirmed from point spacing for the Xevo G2-XS
-  lock-mass functions but not for LCT Premier bundles.
+- **m/z is not lock-mass corrected, and is typically 30 to 100 ppm off.**
+  m/z uses only the calibration stored in `_HEADER.TXT`. Lock-mass
+  (reference) functions are skipped when iterating spectra and are not used
+  to correct the others. Measured on the 69 lock-mass functions of the
+  public test corpus, the reference ion reads about 46 ppm from its true
+  m/z (median), 98 ppm at the 95th percentile and up to 162 ppm. For
+  accurate-mass work, recalibrate
+  against known masses (most search engines have a mass recalibration
+  step; the bundle's own lock-mass scans are available through
+  `Reader::decode_scan`), or search with tolerances of at least 100 ppm.
+- **No ion mobility decoding.** SYNAPT, Vion and Cyclic IMS scans are
+  returned as m/z and intensity only. There is no drift-time output, and
+  mzML output carries no mobility arrays.
+- **DDA precursors carry m/z only.** Data-dependent MS/MS scans report the
+  precursor m/z recorded for each scan, as both isolation window target and
+  selected ion m/z. No charge state, isolation width or reference to the
+  triggering survey scan is reported; none has been found in the files.
+- **MS level of Vion MSe data.** The high-energy function of an MSe
+  acquisition is reported as MS2 when the bundle labels it `TOF PARENT`, or
+  labels it `TOF MS` and records its collision-energy ramp. Vion bundles
+  exported by UNIFI record no collision energy, so both of their `TOF MS`
+  functions are reported as MS1.
+- **Polarity is reported only when the bundle records it.** UNIFI exports
+  do not, so their spectra have no polarity.
+- **Encoding E** (12-byte records): intensity flag bits and the auxiliary
+  word are not interpreted; flagged peaks are kept. Encoding E spectra are
+  labelled centroid. That is confirmed from point spacing for the Xevo
+  G2-XS lock-mass functions but not for LCT Premier bundles.
+- **Tested instruments.** The public test corpus covers Q-Tof, SYNAPT, Vion,
+  Cyclic IMS and Xevo G2-XS/G3 QTof data in positive mode, including MSe,
+  HDMSe, DDA, targeted MS/MS and one MALDI MS/MS bundle. Triple and single
+  quadrupole (MRM/SIR), GC and negative-mode data are untested.
 
 ## Debug logging
 
