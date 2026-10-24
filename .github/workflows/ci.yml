@@ -49,15 +49,31 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Corpus-gated tests read bundles under OPENWRAW_CORPUS as
+      # <root>/<accession>/<bundle>.raw (see crates/openwraw/src/test_corpus.rs).
       - name: Download and unzip Waters sample
         if: runner.os != 'Windows'
         run: |
           wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
-          unzip -q waters.raw.zip
-          test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
+          mkdir -p corpus/PXD058812
+          unzip -q waters.raw.zip -d corpus/PXD058812
+          test -d "corpus/PXD058812/$WATERS_BUNDLE" || (echo "expected bundle dir corpus/PXD058812/$WATERS_BUNDLE missing" && exit 1)
 
+      # Only the conformance bundle is fetched, so the other corpus tests
+      # skip here; REQUIRE_CORPUS is not set for this step.
       - name: cargo test
+        env:
+          OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
         run: cargo test --workspace
+
+      # This job fetched the conformance bundle, so a missing bundle must
+      # fail instead of skipping.
+      - name: cargo test (conformance, corpus required)
+        if: runner.os != 'Windows'
+        env:
+          OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
+          REQUIRE_CORPUS: "1"
+        run: cargo test -p openwraw --test conformance
 
   python:
     name: python (${{ matrix.os }})
@@ -185,17 +201,32 @@ jobs:
           xmllint --noout --schema schema/mzML1.1.0.xsd waters.mzML
           xmllint --noout --schema schema/mzML1.1.2_idx.xsd waters_indexed.mzML
 
+  docs-validation:
+    name: Shared docs validation
+    permissions:
+      contents: read
+    uses: Sigilweaver/ops/.github/workflows/docs.yml@757c6789b96e3ac05bbc7d1a092d01cbeb0cb9e2
+    with:
+      tooling-ref: 757c6789b96e3ac05bbc7d1a092d01cbeb0cb9e2
   docs:
     name: Docs (Docusaurus)
+    needs: docs-validation
+    if: ${{ always() }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docs
+    env:
+      DOCS_RESULT: ${{ needs.docs-validation.result }}
+    steps:
+      - run: test "$DOCS_RESULT" = success
+  # Public API compatibility of the crates.io-published crate against its
+  # latest published version. A breaking change without a matching version
+  # bump fails; a deliberate major bump passes. OS-independent, so Linux only.
+  semver-checks:
+    name: Semver checks
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-      - name: bun install
-        run: bun install --frozen-lockfile
-      - name: bun run build:cloudflare
-        run: bun run build:cloudflare
 
+      - name: cargo semver-checks
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: openwraw

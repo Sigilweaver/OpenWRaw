@@ -1,5 +1,14 @@
 # _PROCnnn.DAT / _PROCnnn.IDX / _PROCnnn.STS / _PROCnnn.MAX
 
+:::note
+
+OpenWRaw does not read these files and decodes no drift time from them. The
+layout notes below, including any `dt_bin` / `tof_bin` split of a record
+word, are unverified working notes. The same split was shown not to hold for
+`_FUNCnnn.DAT` (see `_FUNCnnn.DAT`).
+
+:::
+
 Post-processed spectrum data created by MassLynx peak-processing step.
 Found only in SYNAPT G2-Si IMS acquisitions in the corpus; not present in
 non-IMS or native-MS-only datasets.
@@ -55,8 +64,8 @@ record per PROC file (one "processed spectrum" per file).
 | 0x10   | u16  | Scan-varying count (13945-27076 in WANG corpus); purpose unclear; may be a peak count or hardware reference |
 | 0x12   | u16  | Small for fixed-size type (738-741 in corpus), large for variable-size (21680-50355); purpose unclear |
 | 0x14   | u16  | Same value for PROC pairs at identical RT; differs between RT points (34646-56336 in corpus); may be a scan-level TIC or hardware register |
-| 0x16   | u32  | DAT byte offset (always 0; each PROC has its own .DAT file) |
-| 0x1A   | u32  | 0 |
+| 0x16   | u32  | DAT byte offset, low 32 bits (always 0; each PROC has its own .DAT file) |
+| 0x1A   | u32  | DAT byte offset, high 32 bits (0 in observed PROC files; see `_FUNCnnn.IDX` Variant B) |
 
 ## _PROCnnn.DAT
 

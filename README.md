@@ -5,8 +5,8 @@
 [![crates.io](https://img.shields.io/crates/v/openwraw.svg)](https://crates.io/crates/openwraw)
 [![PyPI](https://img.shields.io/pypi/v/openwraw.svg)](https://pypi.org/project/openwraw/)
 [![docs.rs](https://img.shields.io/docsrs/openwraw)](https://docs.rs/openwraw)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE)
+[![Rust MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 > Part of the [OpenMassSpec](https://github.com/Sigilweaver/OpenMassSpec)
 > stack for mass spectrometry raw-file access.
@@ -73,6 +73,41 @@ print(spec.mz[:5], spec.intensity[:5])
 See the [docs site](https://sigilweaver.app/openwraw/docs) for the full
 quickstart, guide, and format specification.
 
+## Known issues and gaps
+
+- **m/z is not lock-mass corrected, and is typically 30 to 100 ppm off.**
+  m/z uses only the calibration stored in `_HEADER.TXT`. Lock-mass
+  (reference) functions are skipped when iterating spectra and are not used
+  to correct the others. Measured on the 69 lock-mass functions of the
+  public test corpus, the reference ion reads about 46 ppm from its true
+  m/z (median), 98 ppm at the 95th percentile and up to 162 ppm. For
+  accurate-mass work, recalibrate
+  against known masses (most search engines have a mass recalibration
+  step; the bundle's own lock-mass scans are available through
+  `Reader::decode_scan`), or search with tolerances of at least 100 ppm.
+- **No ion mobility decoding.** SYNAPT, Vion and Cyclic IMS scans are
+  returned as m/z and intensity only. There is no drift-time output, and
+  mzML output carries no mobility arrays.
+- **DDA precursors carry m/z only.** Data-dependent MS/MS scans report the
+  precursor m/z recorded for each scan, as both isolation window target and
+  selected ion m/z. No charge state, isolation width or reference to the
+  triggering survey scan is reported; none has been found in the files.
+- **MS level of Vion MSe data.** The high-energy function of an MSe
+  acquisition is reported as MS2 when the bundle labels it `TOF PARENT`, or
+  labels it `TOF MS` and records its collision-energy ramp. Vion bundles
+  exported by UNIFI record no collision energy, so both of their `TOF MS`
+  functions are reported as MS1.
+- **Polarity is reported only when the bundle records it.** UNIFI exports
+  do not, so their spectra have no polarity.
+- **Encoding E** (12-byte records): intensity flag bits and the auxiliary
+  word are not interpreted; flagged peaks are kept. Encoding E spectra are
+  labelled centroid. That is confirmed from point spacing for the Xevo
+  G2-XS lock-mass functions but not for LCT Premier bundles.
+- **Tested instruments.** The public test corpus covers Q-Tof, SYNAPT, Vion,
+  Cyclic IMS and Xevo G2-XS/G3 QTof data in positive mode, including MSe,
+  HDMSe, DDA, targeted MS/MS and one MALDI MS/MS bundle. Triple and single
+  quadrupole (MRM/SIR), GC and negative-mode data are untested.
+
 ## Debug logging
 
 OpenWRaw logs how it reads a bundle: which side files it resolved
@@ -117,7 +152,7 @@ error if any bundle fails to open, any scan fails to decode, or any lock-mass
 function is more than 100 ppm off. Add `--lock-only` to skip the full scan
 pass.
 
-The [2026-09-26 corpus audit](CORPUS-AUDIT.md) records the expanded
+The [2026-09-26 corpus audit](https://github.com/Sigilweaver/OpenWRaw/blob/main/CORPUS-AUDIT.md) records the expanded
 corpus results and the format gaps it exposed.
 
 ## Repository layout
@@ -131,8 +166,8 @@ docs/            Docusaurus site (format spec + guides)
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE).
 
 The format specification was developed by binary analysis of public
 mass-spectrometry datasets (PRIDE accessions). See
-[ATTRIBUTION.md](ATTRIBUTION.md).
+[ATTRIBUTION.md](https://github.com/Sigilweaver/OpenWRaw/blob/main/ATTRIBUTION.md).

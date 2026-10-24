@@ -22,7 +22,7 @@ use ::openwraw::raw::{
     header::Header,
     index::ScanIndex,
 };
-use ::openwraw::{DecodedSpectrum, Encoding, Reader};
+use ::openwraw::{Encoding, Reader};
 
 // -- Error conversion --
 
@@ -110,11 +110,14 @@ fn normalize_record_json(value: &mut serde_json::Value) {
 }
 
 /// Bounded stream of canonical spectrum records.
+///
+/// A scan that cannot be decoded raises `RuntimeError` from `__next__`;
+/// calling `next()` again continues with the following scan.
 #[pyclass(module = "openwraw")]
 struct RecordIter {
     // `None` marks a complete stream, so a closed channel without it means
     // the decode thread died.
-    receiver: Mutex<Receiver<Option<SpectrumRecord>>>,
+    receiver: Mutex<Receiver<Option<openmassspec_core::Result<SpectrumRecord>>>>,
     finished: bool,
 }
 
@@ -137,7 +140,8 @@ impl RecordIter {
                 .map_err(|_| "record decode thread ended without a result")
         });
         match message {
-            Ok(Some(rec)) => record_object(py, rec).map(Some),
+            Ok(Some(Ok(rec))) => record_object(py, rec).map(Some),
+            Ok(Some(Err(error))) => Err(PyRuntimeError::new_err(error.to_string())),
             Ok(None) => {
                 slf.finished = true;
                 Ok(None)
@@ -271,7 +275,8 @@ impl FunctionInfo {
         self.inner.index
     }
 
-    /// Raw function type code (always 0x12 in known corpus).
+    /// Raw function type code: 0x12, 0x10 (MS/MS) or 0x90 (MALDI MS/MS) in
+    /// the public corpus.
     #[getter]
     fn function_type(&self) -> u8 {
         self.inner.function_type
@@ -341,7 +346,8 @@ impl FunctionInfo {
 
 /// A decoded 1-D mass spectrum (m/z vs intensity).
 ///
-/// Returned by `RawReader.read_spectrum()` for Encoding A and C functions.
+/// Returned by `RawReader.read_spectrum()`. No lock-mass correction is
+/// applied, and ion mobility is not decoded.
 #[pyclass]
 pub struct Spectrum {
     /// Calibrated m/z values (Da).
@@ -360,35 +366,6 @@ impl Spectrum {
 
     fn __repr__(&self) -> String {
         format!("Spectrum({} peaks)", self.mz.len())
-    }
-}
-
-// -- ImsSpectrum --
-
-/// A decoded IMS spectrum: m/z, drift time, and intensity per ion.
-///
-/// Returned by `RawReader.read_ims_spectrum()` for Encoding B (SYNAPT) functions.
-#[pyclass]
-pub struct ImsSpectrum {
-    /// Calibrated m/z values (Da).
-    #[pyo3(get)]
-    pub mz: Vec<f64>,
-    /// Ion drift times (ms).
-    #[pyo3(get)]
-    pub drift_time_ms: Vec<f64>,
-    /// Intensity values (raw ion counts).
-    #[pyo3(get)]
-    pub intensity: Vec<f32>,
-}
-
-#[pymethods]
-impl ImsSpectrum {
-    fn __len__(&self) -> usize {
-        self.mz.len()
-    }
-
-    fn __repr__(&self) -> String {
-        format!("ImsSpectrum({} ions)", self.mz.len())
     }
 }
 
@@ -427,7 +404,7 @@ impl ChromChannel {
 
 // -- ChromPoint --
 
-/// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
+/// A single (retention-time, value) sample from a `_CHROnnn.DAT` file.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct ChromPoint {
@@ -498,12 +475,18 @@ impl RawReader {
         )
     }
 
-    /// Canonical TIC, BPC, and other chromatograms with seconds as the time unit.
+    /// Canonical instrument chromatograms with seconds as the time unit.
+    ///
+    /// Raises `RuntimeError` when `_CHROMS.INF` or a channel's
+    /// `_CHROnnn.DAT` cannot be read.
     fn read_chromatograms(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         let mut source = ::openwraw::mzml::WatersSource::new(self.reader.clone());
         source
             .iter_chromatograms()
-            .map(|rec| json_object(py, &rec))
+            .map(|rec| {
+                let rec = rec.map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                json_object(py, &rec)
+            })
             .collect()
     }
 
@@ -543,7 +526,7 @@ impl RawReader {
         out.set_item("lteff_mm", self.ext.lteff_mm)?;
         out.set_item("veff_v", self.ext.veff_v)?;
         out.set_item("pusher_interval_us", self.ext.pusher_interval_us)?;
-        out.set_item("polarity", self.polarity())?;
+        out.set_item("polarity", self.polarity()?)?;
         let functions = PyDict::new(py);
         for (index, f) in &self.ext.functions {
             let row = PyDict::new(py);
@@ -557,7 +540,9 @@ impl RawReader {
         Ok(out)
     }
 
-    /// Collision energy and ETD mode decoded for a scan from `_FUNCnnn.STS`.
+    /// Collision energy, ETD mode and precursor m/z decoded for a scan
+    /// (`_FUNCnnn.STS`, with the `_extern.inf` set mass as the precursor
+    /// fallback). Values the bundle does not record are `None`.
     fn scan_parameters<'py>(
         &self,
         py: Python<'py>,
@@ -571,6 +556,7 @@ impl RawReader {
         let out = PyDict::new(py);
         out.set_item("collision_energy_ev", scan.collision_energy_ev)?;
         out.set_item("etd_fragmentation_mode", scan.etd_fragmentation_mode)?;
+        out.set_item("precursor_mz", scan.precursor_mz)?;
         Ok(out)
     }
 
@@ -648,6 +634,11 @@ impl RawReader {
                 out.set_item("dat_offset", row.dat_offset)?;
                 out.set_item("retention_time_min", row.retention_time_min)?;
             }
+            other => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "index variant has no Python form: {other:?}"
+                )))
+            }
         }
         Ok(out)
     }
@@ -704,11 +695,17 @@ impl RawReader {
     ///
     /// Returns `"positive"`, `"negative"`, or `None` when the field is absent.
     #[getter]
-    fn polarity(&self) -> Option<&'static str> {
-        self.ext.polarity.map(|p| match p {
-            Polarity::Positive => "positive",
-            Polarity::Negative => "negative",
-        })
+    fn polarity(&self) -> PyResult<Option<&'static str>> {
+        self.ext
+            .polarity
+            .map(|p| match p {
+                Polarity::Positive => Ok("positive"),
+                Polarity::Negative => Ok("negative"),
+                other => Err(PyRuntimeError::new_err(format!(
+                    "polarity {other:?} has no Python name"
+                ))),
+            })
+            .transpose()
     }
 
     /// List of all acquisition functions in this .raw file.
@@ -744,15 +741,11 @@ impl RawReader {
 
     /// MS level for a function (1-based `func_index`).
     ///
-    /// Returns `1` for MS1 survey and reference functions, `2` for MSe/DDA/MS2
-    /// functions. Falls back to `1` when the function is not described in
-    /// `_extern.inf`.
+    /// Returns `1` for MS1 survey and reference functions, `2` for MSe
+    /// high-energy, DDA and targeted MS/MS functions. Same rule as the
+    /// `ms_level` of the records this reader yields.
     fn ms_level(&self, func_index: u32) -> u32 {
-        self.ext
-            .functions
-            .get(&func_index)
-            .map(|f| f.mode.ms_level())
-            .unwrap_or(1)
+        self.reader.ms_level(func_index)
     }
 
     /// Number of scans in a function (1-based `func_index`).
@@ -762,14 +755,17 @@ impl RawReader {
 
     /// Encoding variant for a function (1-based `func_index`).
     ///
-    /// Returns `"a"`, `"c"` or `"d"` for one-dimensional spectra, `"b"` for IMS.
+    /// Returns `"a"`, `"d"` or `"e"`, naming the DAT record layout.
     fn function_encoding(&self, func_index: u32) -> PyResult<&'static str> {
         Ok(match self.function(func_index)?.encoding {
             Encoding::A => "a",
-            Encoding::B => "b",
-            Encoding::C => "c",
             Encoding::D => "d",
             Encoding::E => "e",
+            other => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "encoding {other:?} has no Python name"
+                )))
+            }
         })
     }
 
@@ -777,23 +773,17 @@ impl RawReader {
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn retention_time(&self, func_index: u32, scan_index: usize) -> PyResult<f32> {
-        match &self.function(func_index)?.scan_index {
-            ScanIndex::A(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-            ScanIndex::B(scans) => scans
-                .get(scan_index)
-                .map(|s| s.retention_time_min)
-                .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range"))),
-        }
+        self.function(func_index)?
+            .scan_index
+            .retention_time_min(scan_index)
+            .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range")))
     }
 
-    /// Decode a 1-D mass spectrum.
+    /// Decode one scan as calibrated m/z and intensity.
     ///
-    /// Uses Encoding A for older Q-TOF functions and Encoding C for G2/G2-Si.
-    /// For IMS data, this collapses the drift dimension; use `read_ims_spectrum`
-    /// to obtain the full 2-D data.
+    /// No lock-mass correction is applied. Ion mobility is not decoded, so a
+    /// scan from a SYNAPT mobility acquisition is returned as m/z and
+    /// intensity only.
     ///
     /// `func_index` is 1-based; `scan_index` is 0-based.
     fn read_spectrum(&self, func_index: u32, scan_index: usize) -> PyResult<Spectrum> {
@@ -801,39 +791,10 @@ impl RawReader {
             .reader
             .decode_scan(func_index, scan_index)
             .map_err(to_py_err)?;
-        match scan.spectrum {
-            DecodedSpectrum::Plain(spec) => Ok(Spectrum {
-                mz: spec.mz,
-                intensity: spec.intensity,
-            }),
-            DecodedSpectrum::Ims(spec) => Ok(Spectrum {
-                mz: spec.mz,
-                intensity: spec.intensity,
-            }),
-        }
-    }
-
-    /// Decode a full IMS spectrum (m/z, drift time, intensity) for SYNAPT data.
-    ///
-    /// Only valid for Encoding B functions. Returns a `RuntimeError` for
-    /// one-dimensional functions.
-    ///
-    /// `func_index` is 1-based; `scan_index` is 0-based.
-    fn read_ims_spectrum(&self, func_index: u32, scan_index: usize) -> PyResult<ImsSpectrum> {
-        let scan = self
-            .reader
-            .decode_scan(func_index, scan_index)
-            .map_err(to_py_err)?;
-        match scan.spectrum {
-            DecodedSpectrum::Ims(spec) => Ok(ImsSpectrum {
-                mz: spec.mz,
-                drift_time_ms: spec.drift_time_ms,
-                intensity: spec.intensity,
-            }),
-            DecodedSpectrum::Plain(_) => Err(PyRuntimeError::new_err(
-                "function is not IMS; use read_spectrum instead",
-            )),
-        }
+        Ok(Spectrum {
+            mz: scan.spectrum.mz,
+            intensity: scan.spectrum.intensity,
+        })
     }
 
     /// Read a chromatographic channel as a list of `ChromPoint` values.
@@ -884,6 +845,7 @@ impl RawReader {
 
 #[pymodule]
 fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<RecordIter>()?;
     // Forward Rust `log` records to Python `logging` under the "openwraw"
     // logger hierarchy. Records below the configured Python level are
@@ -894,7 +856,6 @@ fn openwraw(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RunHeader>()?;
     m.add_class::<FunctionInfo>()?;
     m.add_class::<Spectrum>()?;
-    m.add_class::<ImsSpectrum>()?;
     m.add_class::<ChromChannel>()?;
     m.add_class::<ChromPoint>()?;
     Ok(())

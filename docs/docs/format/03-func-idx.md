@@ -37,7 +37,7 @@ Format: `(marker << 24) | n_records`.
 
 The lower 24 bits count DAT records. PXD041695 has scans with more than 65,535
 records, so reading only the lower 16 bits truncates them. The high byte is
-0x18 in the earlier corpus and 0x4c/0x08 in the public LCT mass/lock
+0x18 in the other observed functions and 0x4c/0x08 in the public LCT mass/lock
 functions. DAT records may be 6, 8 or 12 bytes; consecutive DAT offsets
 establish the width. Those offsets also establish scan boundaries directly.
 At sizes divisible by both 22 and 30, these known markers and ordered DAT
@@ -51,8 +51,9 @@ decoder emits the former after removing sentinel and zero-intensity records;
 it does not centroid, so its output count and `peak_count` measure different
 things and an equality check would reject valid corpus scans.
 
-What does hold, and is what `Reader::decode_scan` checks (as a
-`debug_assert!`, `check_peak_count_sanity` in `reader.rs`): a centroid count
+What does hold, and is what `Reader::decode_scan` checks
+(`check_peak_count_sanity` in `reader.rs`, which logs a warning when it
+fails): a centroid count
 can never exceed the raw decoded record count, since every centroid is built
 from at least one raw point. `peak_count <= decoded_len` is therefore a cheap
 decode sanity check - it catches a decode that produced implausibly few
@@ -75,9 +76,13 @@ Key facts:
 - File size = N x 30 bytes (exact, no header)
 - DAT byte offset stored at +0x16 (NOT +0x00) - confirmed for all three datasets
 - Scan sizes vary depending on ion density
-- Total records check: sum(scan_sizes) / 8 = DAT_size / 8 exactly (flat 8-byte record array)
-- The Xevo G2-XS QTof (non-IMS) uses this variant despite having no drift dimension;
-  the IDX stride is 30 bytes and DAT records are 8 bytes (see `_FUNCnnn.DAT` Encoding C)
+- No record count: a scan runs from its offset to the next record's offset
+  (the last scan runs to the end of the DAT)
+- The index does not determine the DAT record layout. Behind this variant
+  the corpus holds 8-byte Encoding D records and, in some Xevo G2-XS
+  lock-mass functions, 12-byte Encoding E records; the width is judged from
+  the data (see `_FUNCnnn.DAT`, "Choosing the record width")
+- Both SYNAPT (mobility-capable) and Xevo QTof instruments use this variant
 
 | Offset | Type | Confirmed | Description |
 |--------|------|-----------|-------------|
@@ -87,10 +92,21 @@ Key facts:
 | 0x0C   | f32  | **Yes**   | Retention time (minutes) |
 | 0x10   | u32  | No        | 4-byte field; interpreted as f32 gives scan-varying values (~18577 in WANG) but some scans have non-physical f32 garbage; purpose unclear |
 | 0x14   | u16  | No        | Hardware register; large values (35124-65208 in WANG); purpose unknown |
-| 0x16   | u32  | **Yes**   | Byte offset into .DAT file |
-| 0x1A   | u32  | No        | Always 0 in tested datasets |
+| 0x16   | u32  | **Yes**   | Byte offset into .DAT file, low 32 bits |
+| 0x1A   | u32  | **Yes**   | Byte offset into .DAT file, high 32 bits (0 while the DAT is under 4 GiB) |
+
+The DAT offset is a 64-bit little-endian value at +0x16..+0x1E. Most DAT
+files are under 4 GiB, so the high word at +0x1A is usually 0. Functions
+with a larger DAT set it once the offset crosses 4 GiB: in PXD045625
+`Abu_190520_Sha11.raw`, `_FUNC001.IDX` scan 2699 has low word 1,626,312
+and high word 1 (offset 4,296,593,608). Three corpus functions (7.0 GB,
+5.9 GB and 4.5 GB DAT files) have offsets past 4 GiB, covering 2,708
+scans. Reading only the low word wraps the offset back to the start of the
+file.
 
 Validated: sum of (IDX[i+1].offset - IDX[i].offset) for all i = DAT file size exactly.
+Offsets are non-decreasing and never exceed the DAT size in the corpus; the
+reader rejects a scan whose offsets go backwards or past the end of the DAT.
 
 ### Field +0x04: Hardware tick counter
 
@@ -107,7 +123,7 @@ Predicted value = n_pushes x (pusher_period_us x 800):
 | CtpA    | 4317     | 93299               | 116.6 us                 |
 
 DHPR result (60.6 us) is consistent with the FUNCTNS.INF-derived 60.25 us pusher period.
-WANG result (35.0 us) corrects the previous 69 us estimate from tof_depth alone.
+WANG result (35.0 us) differs from the 69 us implied by tof_depth alone.
 CtpA (116.6 us) is anomalously long; may reflect a different acquisition mode.
 
 The 800 MHz figure is inferred; the actual clock rate is not confirmed from
@@ -126,8 +142,8 @@ before per-scan intensity processing.
 
 - Check file_size mod 22 == 0 (Variant A) or mod 30 == 0 (Variant B)
 - Both should be mutually exclusive in practice
-- Variant B is used by both IMS (SYNAPT) and non-IMS (Xevo G2-XS) instruments
-- Presence of Apex3DIons.csv strongly implies IMS mode even if IDX is Variant B
+- Variant B is used by both SYNAPT and Xevo QTof instruments, and does not
+  by itself indicate an ion mobility acquisition
 
 ## Fields Under Investigation
 
@@ -142,8 +158,8 @@ before per-scan intensity processing.
 
 - Empirical hex analysis: `re/src/analysis/inspect.py records`
 - Corpus samples:
-  - PXD066594/WANG.raw (Variant B, SYNAPT G2-Si IMS, 590 scans)
-  - PXD068881/20220517_CtpA_1076_2h_1.raw (Variant B, SYNAPT G2-Si IMS, 1138 scans)
+  - PXD066594/WANG.raw (Variant B, SYNAPT G2-Si, 590 scans)
+  - PXD068881/20220517_CtpA_1076_2h_1.raw (Variant B, SYNAPT G2-Si, 1138 scans)
   - PXD058812/molecular_mass_P15_01.raw (Variant A, QTOF non-IMS, 197 scans)
   - PXD058812/MS_fragmentation_P29_01.raw (Variant A, QTOF non-IMS, 426 scans)
   - PXD075602/DHPR_11257-1.raw (Variant B, Xevo G2-XS QTof non-IMS, 1150 scans)

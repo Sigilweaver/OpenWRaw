@@ -6,18 +6,20 @@
 use std::path::Path;
 
 /// Record stride for Variant A (non-IMS / simple TOF-MS).
-pub const STRIDE_A: usize = 22;
-/// Record stride for Variant B (IMS SYNAPT and Xevo G2-XS QTof).
-pub const STRIDE_B: usize = 30;
+pub(crate) const STRIDE_A: usize = 22;
+/// Record stride for Variant B (SYNAPT G2-S and later, Xevo G2-XS and G3).
+pub(crate) const STRIDE_B: usize = 30;
 
-/// Constant upper-16-bit marker in the Variant A +0x04 packed field.
-/// Value 0x1800 identifies the DAT encoding format for this scan.
-pub const VARIANT_A_TYPE_MARKER: u32 = 0x1800;
+/// Upper 16 bits of the Variant A +0x04 packed field in the 6-byte and
+/// 8-byte record families; used to build test records.
+#[cfg(test)]
+const VARIANT_A_TYPE_MARKER: u32 = 0x1800;
 
 /// A scan index record from a Variant A (`_FUNCnnn.IDX`, 22-byte stride).
 ///
 /// Observed in non-IMS Q-TOF instruments (PXD058812).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ScanIndexA {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.
     pub dat_offset: u32,
@@ -32,19 +34,29 @@ pub struct ScanIndexA {
 
 /// A scan index record from a Variant B (`_FUNCnnn.IDX`, 30-byte stride).
 ///
-/// Observed in SYNAPT G2-Si (IMS) and Xevo G2-XS QTof (non-IMS).
+/// Observed in SYNAPT G2-S/G2-Si/XS and Xevo G2-XS/G3 bundles. The record
+/// has no record count, so the DAT record width is judged from the data by
+/// the reader.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ScanIndexB {
     /// Byte offset of this scan's data within `_FUNCnnn.DAT`.
-    pub dat_offset: u32,
+    ///
+    /// Stored as a 64-bit little-endian value split across two u32 words:
+    /// the low word at +0x16 and the high word at +0x1A. The high word is 0
+    /// for DAT files under 4 GiB and non-zero past that boundary.
+    pub dat_offset: u64,
     /// Retention time (minutes).
     pub retention_time_min: f32,
 }
 
 /// Parsed index from a `_FUNCnnn.IDX` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ScanIndex {
+    /// 22-byte records.
     A(Vec<ScanIndexA>),
+    /// 30-byte records.
     B(Vec<ScanIndexB>),
 }
 
@@ -62,8 +74,8 @@ impl ScanIndex {
     /// Parse from a raw byte slice.
     pub fn from_bytes(data: &[u8]) -> crate::Result<Self> {
         let len = data.len();
-        let fits_a = len % STRIDE_A == 0;
-        let fits_b = len % STRIDE_B == 0;
+        let fits_a = len.is_multiple_of(STRIDE_A);
+        let fits_b = len.is_multiple_of(STRIDE_B);
 
         match (fits_a, fits_b) {
             (true, false) => Ok(ScanIndex::A(parse_variant_a(data)?)),
@@ -72,7 +84,7 @@ impl ScanIndex {
             (true, true) => {
                 // At a 330-byte boundary, use the Variant A packed marker and
                 // monotonically increasing DAT offsets to disambiguate.
-                let looks_a = data.chunks_exact(STRIDE_A).all(|rec| {
+                let looks_a = data.as_chunks::<STRIDE_A>().0.iter().all(|rec| {
                     let packed = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
                     // 0x18: existing 6/8-byte families; 0x4c/0x08: public
                     // LCT Premier mass/lock functions (12-byte records).
@@ -81,7 +93,9 @@ impl ScanIndex {
                         0x1800_0000 | 0x4c00_0000 | 0x0800_0000
                     )
                 }) && data
-                    .chunks_exact(STRIDE_A)
+                    .as_chunks::<STRIDE_A>()
+                    .0
+                    .iter()
                     .map(|rec| u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]))
                     .is_sorted();
                 log::debug!(
@@ -110,6 +124,15 @@ impl ScanIndex {
         match self {
             ScanIndex::A(v) => v.len(),
             ScanIndex::B(v) => v.len(),
+        }
+    }
+
+    /// Retention time (minutes) of the `scan_idx`-th scan (0-based), or
+    /// `None` when the index has no such scan.
+    pub fn retention_time_min(&self, scan_idx: usize) -> Option<f32> {
+        match self {
+            ScanIndex::A(v) => v.get(scan_idx).map(|r| r.retention_time_min),
+            ScanIndex::B(v) => v.get(scan_idx).map(|r| r.retention_time_min),
         }
     }
 
@@ -153,7 +176,11 @@ fn parse_variant_b(data: &[u8]) -> crate::Result<Vec<ScanIndexB>> {
         let rec = &data[off..off + STRIDE_B];
 
         let retention_time_min = crate::bytes::read_f32_le(rec, 0x0C)?;
-        let dat_offset = crate::bytes::read_u32_le(rec, 0x16)?;
+        // +0x16 is the low word and +0x1A the high word of a 64-bit offset.
+        // The high word is non-zero once a function's DAT exceeds 4 GiB.
+        let lo = crate::bytes::read_u32_le(rec, 0x16)?;
+        let hi = crate::bytes::read_u32_le(rec, 0x1A)?;
+        let dat_offset = (u64::from(hi) << 32) | u64::from(lo);
 
         records.push(ScanIndexB {
             dat_offset,
@@ -180,10 +207,10 @@ mod tests {
         rec
     }
 
-    fn make_b_record(dat_off: u32, rt: f32) -> [u8; STRIDE_B] {
+    fn make_b_record(dat_off: u64, rt: f32) -> [u8; STRIDE_B] {
         let mut rec = [0u8; STRIDE_B];
         rec[0x0C..0x10].copy_from_slice(&rt.to_le_bytes());
-        rec[0x16..0x1A].copy_from_slice(&dat_off.to_le_bytes());
+        rec[0x16..0x1E].copy_from_slice(&dat_off.to_le_bytes());
         rec
     }
 
@@ -335,7 +362,7 @@ mod tests {
 
     #[test]
     fn variant_b_dat_offsets_increase() {
-        let offsets = [0x00000000u32, 0x000047c8, 0x00008768, 0x0000ccb8];
+        let offsets = [0x00000000u64, 0x000047c8, 0x00008768, 0x0000ccb8];
         let data = b_data(&offsets.map(|o| make_b_record(o, 0.1)));
         let ScanIndex::B(recs) = ScanIndex::from_bytes(&data).unwrap() else {
             panic!("expected Variant B")
@@ -343,6 +370,25 @@ mod tests {
         for w in recs.windows(2) {
             assert!(w[1].dat_offset > w[0].dat_offset);
         }
+    }
+
+    // Regression: a function whose DAT exceeds 4 GiB stores the high 32 bits
+    // of the offset at +0x1A. Values mirror PXD045625 Abu_190520_Sha11.raw
+    // _FUNC001.IDX scan 2699 (lo = 1,626,312, hi = 1), written byte by byte
+    // so the test does not depend on the helper's layout.
+    #[test]
+    fn variant_b_offset_reads_high_word_at_0x1a() {
+        let mut below = [0u8; STRIDE_B];
+        below[0x16..0x1A].copy_from_slice(&0xFFFF_FF00u32.to_le_bytes());
+        let mut above = [0u8; STRIDE_B];
+        above[0x16..0x1A].copy_from_slice(&1_626_312u32.to_le_bytes());
+        above[0x1A..0x1E].copy_from_slice(&1u32.to_le_bytes());
+        let ScanIndex::B(recs) = ScanIndex::from_bytes(&b_data(&[below, above])).unwrap() else {
+            panic!("expected Variant B")
+        };
+        assert_eq!(recs[0].dat_offset, 0xFFFF_FF00);
+        assert_eq!(recs[1].dat_offset, (1u64 << 32) + 1_626_312);
+        assert!(recs[1].dat_offset > recs[0].dat_offset);
     }
 
     // --- Detection ---

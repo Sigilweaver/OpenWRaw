@@ -94,7 +94,7 @@ $CC$,<scale_f>,<type_code>,<lo_limit>,<hi_limit>,<units>
 | 5      | 1 (col/samp)| (1) Peltier Engine Power | % Power |
 | 6      | 1 (col/samp)| (1) Chamber Temp         | °C |
 
-### Previously Documented Channel Subset (PXD075602 DHPR_11257-1.raw)
+### Flow and Temperature Channels (PXD075602 DHPR_11257-1.raw)
 
 The following three channels are records 2..4 of the five-channel file.
 
@@ -122,9 +122,9 @@ motivate (Sigilweaver/OpenWRaw#24).
 
 ## Companion Chromatogram Files
 
-For each channel record in `_CHROMS.INF` there is a corresponding `_CHROnnnn.DAT` file
+For each channel record in `_CHROMS.INF` there is a corresponding `_CHROnnn.DAT` file
 numbered 1-based with 3-digit zero-padding (e.g., `_CHRO001.DAT` for record 0). The `.DAT` files contain decoded pairs of retention time and channel value;
-see [08 - _CHROnnnn.DAT](08-chro-dat.md).
+see [08 - _CHROnnn.DAT](08-chro-dat.md).
 
 ## Reference Sources
 

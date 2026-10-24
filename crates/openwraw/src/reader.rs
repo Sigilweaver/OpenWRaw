@@ -5,8 +5,9 @@
 //!
 //! * Parses `_HEADER.TXT`, `_FUNCTNS.INF`, `_extern.inf`.
 //! * Discovers every `_FUNCnnn.IDX` / `_FUNCnnn.DAT` pair on disk.
-//! * Picks an encoding (A / B / C / D / E) per function from IDX stride, DAT record
-//!   width, and instrument name (`SYNAPT*` indicates Encoding B IMS).
+//! * Picks an encoding (A / D / E) per function from the DAT record width:
+//!   the 22-byte index gives it through record counts and offsets, and for
+//!   the 30-byte index it is read from the position words of sampled scans.
 //! * Provides [`Reader::iter_spectra`] which yields one decoded spectrum
 //!   per scan, in `(function_index, scan_index_in_function)` order,
 //!   skipping lock-mass functions.
@@ -18,10 +19,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::raw::data::{
-    decode_encoding_a, decode_encoding_b, decode_encoding_c, decode_encoding_d, decode_encoding_e,
-    DecodeParams, ImsSpectrum, Spectrum,
+    decode_encoding_a, decode_encoding_d, decode_encoding_e, variant_b_record_width, DecodeParams,
+    Spectrum,
 };
-use crate::raw::extern_inf::ExternInf;
+use crate::raw::extern_inf::{ExternInf, FunctionMode};
 use crate::raw::func_sts::FuncSts;
 use crate::raw::functions_inf::{FunctionInfo, FunctionTable};
 use crate::raw::header::{FunctionCal, Header};
@@ -45,30 +46,53 @@ fn check_peak_count_sanity(
     peak_count: u16,
     decoded_len: usize,
 ) {
-    debug_assert!(
-        peak_count as usize <= decoded_len,
-        "function {function_index} scan {scan_idx}: _FUNCnnn.IDX peak_count \
-         {peak_count} exceeds decoded peak count {decoded_len}"
-    );
+    // `peak_count` comes from the file, so a mismatch is a data problem to
+    // report, not an internal invariant to assert.
+    if peak_count as usize > decoded_len {
+        log::warn!(
+            "function {function_index} scan {scan_idx}: _FUNCnnn.IDX peak_count \
+             {peak_count} exceeds decoded peak count {decoded_len}"
+        );
+    }
 }
 
 /// Which decoder applies to a given function's `_FUNCnnn.DAT`.
+///
+/// The encoding names the DAT record layout. It is independent of the index
+/// variant (`ScanIndex::A` or `ScanIndex::B`), except that Encoding A has
+/// only been seen with the 22-byte index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Encoding {
-    /// 6-byte records, sentinel-anchored. Variant A index.
+    /// 6-byte records (u16 ion count, floating-point m/z). Variant A index.
     A,
-    /// 8-byte IMS records (count, dt_bin, tof_bin). Variant B index.
-    B,
-    /// 8-byte non-IMS records (intensity, sub_bin, tof_bin). Variant B index.
-    C,
-    /// 8-byte records (16.16 intensity, floating-point m/z). Variant A index.
+    /// 8-byte records (16.16 intensity, floating-point m/z). Either index.
     D,
-    /// 12-byte records (compressed intensity, floating-point m/z, auxiliary word).
+    /// 12-byte records (compressed intensity, floating-point m/z, auxiliary
+    /// word). Either index.
     E,
+}
+
+impl Encoding {
+    /// Whether this encoding stores centroids rather than profile points.
+    ///
+    /// Encodings A and D store profile data: peaks span runs of points one
+    /// sample apart. Encoding E stores isolated, irregularly spaced points
+    /// (one per peak) in the corpus functions that use it behind the 30-byte
+    /// index; the LCT Premier functions behind the 22-byte index share its
+    /// record layout and are treated the same, which the public corpus has
+    /// not confirmed from their point spacing (`docs/format/04-func-dat.md`).
+    pub fn is_centroided(self) -> bool {
+        match self {
+            Encoding::A | Encoding::D => false,
+            Encoding::E => true,
+        }
+    }
 }
 
 /// One acquisition function's static metadata, ready for decoding.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FunctionEntry {
     /// 1-based function index.
     pub index: u32,
@@ -101,24 +125,25 @@ impl FunctionEntry {
 
     /// Build the [`DecodeParams`] needed for one of the `decode_encoding_*`
     /// primitives.
-    fn decode_params(&self, extern_inf: &ExternInf) -> DecodeParams {
-        DecodeParams {
-            a_us: extern_inf.a_us(),
-            cal: self.cal.clone(),
-            mz_low: self.info.mz_low as f64,
-            mz_high: self.info.mz_high as f64,
-            scan_time_ms: self.info.scan_time_s as f64 * 1000.0,
-        }
+    fn decode_params(&self) -> DecodeParams {
+        DecodeParams::new(self.cal.clone())
     }
 }
 
 /// A fully-parsed Waters `.raw/` bundle, ready to stream spectra.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Reader {
+    /// The bundle directory passed to [`Reader::open`].
     pub dir: PathBuf,
+    /// Directory name of the bundle, e.g. `sample.raw`.
     pub bundle_name: String,
+    /// Parsed `_HEADER.TXT`.
     pub header: Header,
+    /// Parsed `_extern.inf`.
     pub extern_inf: ExternInf,
+    /// Functions whose `_FUNCnnn.IDX` and `_FUNCnnn.DAT` are both present,
+    /// in `_FUNCTNS.INF` order, lock-mass functions included.
     pub functions: Vec<FunctionEntry>,
 }
 
@@ -138,7 +163,6 @@ impl Reader {
             .map_err(|e| e.with_context(format!("reading {}", functions_path.display())))?;
 
         let instrument = header.instrument.clone().unwrap_or_default();
-        let is_synapt = instrument.to_ascii_uppercase().starts_with("SYNAPT");
         log::debug!(
             "instrument {instrument:?}; Lteff {} mm, Veff {} V, pusher interval {}; \
              {} functions in _FUNCTNS.INF; T1 calibration for functions {:?}",
@@ -180,14 +204,9 @@ impl Reader {
                             .to_owned(),
                     ),
                 },
-                ScanIndex::B(_) if is_synapt => (
-                    Encoding::B,
-                    format!("30-byte index, instrument {instrument:?} starts with SYNAPT"),
-                ),
-                ScanIndex::B(_) => (
-                    Encoding::C,
-                    format!("30-byte index, instrument {instrument:?} is not SYNAPT"),
-                ),
+                ScanIndex::B(records) => {
+                    variant_b_encoding(info.index, &dat_path, records, dat_size)
+                }
             };
             let cal = match header.cal_functions.get(&info.index) {
                 Some(cal) => cal.clone(),
@@ -284,6 +303,85 @@ impl Reader {
             .sum()
     }
 
+    /// MS level of a function (1-based `function_index`), from in-file
+    /// evidence.
+    ///
+    /// Rules, in order:
+    ///
+    /// 1. `_extern.inf` section labelled `REFERENCE`: MS1.
+    /// 2. Labelled `TOF MSMS` or `TOF DAUGHTER`: MS2.
+    /// 3. Labelled `TOF MS`: MS2 when the section records a collision-energy
+    ///    ramp ([`ExternFunction::collision_energy_ramp_ev`]) and another
+    ///    non-lock-mass `TOF MS` function of the same bundle records none.
+    ///    This is the high-energy function of an MSe acquisition whose
+    ///    header does not say `TOF PARENT`. Otherwise MS1.
+    /// 4. Anything else (`TOF PARENT`, `TOF SURVEY`, `MOBILITY SURVEY`,
+    ///    unlabelled): function 1, or the only function, is MS1; any other
+    ///    function is MS2.
+    ///
+    /// [`ExternFunction::collision_energy_ramp_ev`]: crate::raw::extern_inf::ExternFunction::collision_energy_ramp_ev
+    pub fn ms_level(&self, function_index: u32) -> u32 {
+        if let Some(f) = self.extern_inf.functions.get(&function_index) {
+            match f.mode {
+                FunctionMode::Reference => return 1,
+                FunctionMode::Msms | FunctionMode::Daughter => return 2,
+                FunctionMode::Ms => {
+                    return if f.collision_energy_ramp_ev.is_some()
+                        && self.has_unramped_ms_partner(function_index)
+                    {
+                        2
+                    } else {
+                        1
+                    };
+                }
+                _ => {}
+            }
+        }
+        if function_index == 1 || self.functions.len() == 1 {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Whether another non-lock-mass function labelled `TOF MS` records no
+    /// collision-energy ramp (the low-energy half of an MSe pair).
+    fn has_unramped_ms_partner(&self, function_index: u32) -> bool {
+        self.functions.iter().any(|entry| {
+            entry.index != function_index
+                && !entry.info.is_lock_mass()
+                && self
+                    .extern_inf
+                    .functions
+                    .get(&entry.index)
+                    .is_some_and(|f| {
+                        f.mode == FunctionMode::Ms && f.collision_energy_ramp_ev.is_none()
+                    })
+        })
+    }
+
+    /// Precursor m/z of one scan (1-based `function_index`, 0-based
+    /// `scan_idx`), or `None` when the bundle records none.
+    ///
+    /// Taken from the scan's "Set Mass" channel in `_FUNCnnn.STS`, which
+    /// holds each data-dependent (DDA) MS/MS scan's precursor, and otherwise
+    /// from the function's `Set Mass` in `_extern.inf` (targeted MS/MS
+    /// without an STS file). A stored 0 in either place means no precursor
+    /// and gives `None`. MS1 and MSe functions have no precursor.
+    pub fn precursor_mz(&self, function_index: u32, scan_idx: usize) -> Option<f64> {
+        self.functions
+            .iter()
+            .find(|f| f.index == function_index)
+            .and_then(|entry| entry.sts.as_ref())
+            .and_then(|sts| sts.set_mass(scan_idx))
+            .or_else(|| {
+                self.extern_inf
+                    .functions
+                    .get(&function_index)
+                    .and_then(|f| f.set_mass_da)
+            })
+    }
+
     /// Decode the `i`-th scan (0-based) of the given function.
     pub fn decode_scan(&self, function_index: u32, scan_idx: usize) -> crate::Result<DecodedScan> {
         self.decode_scan_inner(function_index, scan_idx)
@@ -315,19 +413,15 @@ impl Reader {
             entry.dat_path.display()
         );
         let bytes = read_slice(&entry.dat_path, offset, length)?;
-        let params = entry.decode_params(&self.extern_inf);
-        let decoded = match entry.encoding {
-            Encoding::A => DecodedSpectrum::Plain(decode_encoding_a(&bytes, &params)?),
-            Encoding::B => DecodedSpectrum::Ims(decode_encoding_b(&bytes, &params)?),
-            Encoding::C => DecodedSpectrum::Plain(decode_encoding_c(&bytes, &params)?),
-            Encoding::D => DecodedSpectrum::Plain(decode_encoding_d(&bytes, &params)?),
-            Encoding::E => DecodedSpectrum::Plain(decode_encoding_e(&bytes, &params)?),
+        let params = entry.decode_params();
+        let spectrum = match entry.encoding {
+            Encoding::A => decode_encoding_a(&bytes, &params)?,
+            Encoding::D => decode_encoding_d(&bytes, &params)?,
+            Encoding::E => decode_encoding_e(&bytes, &params)?,
         };
         // Only Encoding A's 6-byte records are known to relate to the IDX
         // `peak_count` this way (docs/format/03-func-idx.md).
-        if let (Encoding::A, ScanIndex::A(records), DecodedSpectrum::Plain(spectrum)) =
-            (entry.encoding, &entry.scan_index, &decoded)
-        {
+        if let (Encoding::A, ScanIndex::A(records)) = (entry.encoding, &entry.scan_index) {
             if let Some(rec) = records.get(scan_idx) {
                 check_peak_count_sanity(
                     function_index,
@@ -345,13 +439,15 @@ impl Reader {
             .sts
             .as_ref()
             .and_then(|sts| sts.etd_fragmentation_mode(scan_idx));
+        let precursor_mz = self.precursor_mz(function_index, scan_idx);
         Ok(DecodedScan {
             function_index,
             scan_idx,
             retention_time_min: rt_min,
-            spectrum: decoded,
+            spectrum,
             collision_energy_ev,
             etd_fragmentation_mode,
+            precursor_mz,
         })
     }
 
@@ -412,8 +508,8 @@ fn index_end(scan_index: &ScanIndex, encoding: Encoding) -> Option<u64> {
     };
     let width = match encoding {
         Encoding::A => 6,
+        Encoding::D => 8,
         Encoding::E => 12,
-        _ => 8,
     };
     records
         .iter()
@@ -425,6 +521,86 @@ fn required_file(dir: &Path, name: &str) -> crate::Result<PathBuf> {
     find_file(dir, name)?.ok_or_else(|| {
         crate::Error::Parse(format!("required file {name} missing in {}", dir.display()))
     })
+}
+
+/// Scans sampled, evenly spaced, when judging a Variant B record width.
+const VARIANT_B_WIDTH_SAMPLES: usize = 16;
+
+/// Choose between Encodings D and E for a function with a 30-byte index by
+/// sampling scan slices from its DAT file. A failed read is logged and does
+/// not fail `Reader::open`; scans that cannot be read report their own errors
+/// when decoded.
+fn variant_b_encoding(
+    function: u32,
+    dat_path: &Path,
+    records: &[crate::raw::index::ScanIndexB],
+    dat_size: u64,
+) -> (Encoding, String) {
+    match sample_variant_b_width(dat_path, records, dat_size) {
+        Ok(Some((12, scan))) => (
+            Encoding::E,
+            format!("30-byte index, 12-byte records judged from scan {scan}"),
+        ),
+        Ok(Some((_, scan))) => (
+            Encoding::D,
+            format!("30-byte index, 8-byte records judged from scan {scan}"),
+        ),
+        Err(e) => {
+            // Each scan that cannot be read reports its own error when
+            // decoded; the other functions in the bundle stay readable.
+            log::warn!(
+                "function {}: could not sample scans of {}: {e}; \
+                 assuming 8-byte records",
+                function,
+                dat_path.display()
+            );
+            (
+                Encoding::D,
+                "30-byte index, sampling read failed; assuming 8-byte records".to_owned(),
+            )
+        }
+        Ok(None) => {
+            log::warn!(
+                "function {}: record width not established from sampled \
+                 scans of {}; assuming 8-byte records",
+                function,
+                dat_path.display()
+            );
+            (
+                Encoding::D,
+                "30-byte index, record width not established from sampled \
+                 scans; assuming 8-byte records"
+                    .to_owned(),
+            )
+        }
+    }
+}
+
+/// Judge the DAT record width of a 30-byte-index function from up to
+/// [`VARIANT_B_WIDTH_SAMPLES`] evenly spaced scans. Returns the width and the
+/// scan that decided it, or `None` when no sampled scan decides it.
+fn sample_variant_b_width(
+    dat_path: &Path,
+    records: &[crate::raw::index::ScanIndexB],
+    dat_size: u64,
+) -> crate::Result<Option<(u64, usize)>> {
+    let n = records.len();
+    let samples = n.min(VARIANT_B_WIDTH_SAMPLES);
+    for j in 0..samples {
+        let i = n * (2 * j + 1) / (2 * samples);
+        let start = records[i].dat_offset;
+        let end = records.get(i + 1).map_or(dat_size, |r| r.dat_offset);
+        // Out-of-range offsets are reported when the scan is decoded.
+        if start >= end || end > dat_size {
+            continue;
+        }
+        let bytes = read_slice(dat_path, start, end - start)
+            .map_err(|e| e.with_context(format!("sampling {}", dat_path.display())))?;
+        if let Some(width) = variant_b_record_width(&bytes) {
+            return Ok(Some((width, i)));
+        }
+    }
+    Ok(None)
 }
 
 /// The 22-byte index is paired with 6-byte, 8-byte and 12-byte DAT records.
@@ -445,12 +621,16 @@ fn variant_a_record_width(records: &[crate::raw::index::ScanIndexA]) -> Option<u
 
 /// One scan after decoding.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct DecodedScan {
+    /// 1-based function index.
     pub function_index: u32,
     /// 0-based position within the function.
     pub scan_idx: usize,
+    /// Retention time (minutes) from `_FUNCnnn.IDX`.
     pub retention_time_min: f32,
-    pub spectrum: DecodedSpectrum,
+    /// Calibrated m/z and intensity. Ion mobility is not decoded.
+    pub spectrum: Spectrum,
     /// Per-scan collision energy (eV) from `_FUNCnnn.STS`'s "Collision
     /// Energy" channel, when the file is present and defines that channel.
     pub collision_energy_ev: Option<f64>,
@@ -458,15 +638,9 @@ pub struct DecodedScan {
     /// Fragmentation Mode" channel (seq 121): `0` for CID, non-zero for
     /// ETD, `None` when the file is absent or doesn't define the channel.
     pub etd_fragmentation_mode: Option<f64>,
-}
-
-/// Decoded payload of a scan; varies by encoding.
-#[derive(Debug, Clone)]
-pub enum DecodedSpectrum {
-    /// Output of Encoding A or C.
-    Plain(Spectrum),
-    /// Output of Encoding B (IMS).
-    Ims(ImsSpectrum),
+    /// Precursor m/z, from [`Reader::precursor_mz`]. `None` for MS1 and
+    /// MSe scans and wherever the bundle stores no precursor.
+    pub precursor_mz: Option<f64>,
 }
 
 /// Resolve the byte slice for scan `scan_idx` within `entry`'s DAT file.
@@ -475,11 +649,14 @@ pub enum DecodedSpectrum {
 /// length implied by `entry.dat_size`.
 ///
 /// `dat_offset` and (for Variant B) the next record's `dat_offset` are raw
-/// fields read straight from the `.IDX` file, so `length` is capped against
-/// `entry.dat_size` (the real, already-known size of the paired `.DAT` file)
-/// before returning: an IDX record claiming a scan larger than the DAT file
-/// that actually exists must not be able to force an allocation sized from
-/// unvalidated file-controlled offsets in `read_slice`.
+/// fields read straight from the `.IDX` file. An offset past the end of the
+/// paired `.DAT` file, or (Variant B) a next offset that goes backwards or
+/// past the end, is rejected with an error instead of decoding bytes that do
+/// not belong to the scan. Variant A's `length` is capped against
+/// `entry.dat_size` (the real, already-known size of the `.DAT` file): an
+/// IDX record claiming a scan larger than the DAT file that actually exists
+/// must not be able to force an allocation sized from unvalidated
+/// file-controlled values in `read_slice`.
 fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64, f32)> {
     let (offset, length, retention_time_min) = match &entry.scan_index {
         ScanIndex::A(records) => {
@@ -491,11 +668,18 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
             })?;
             // Variant A stores the record count directly; the width depends
             // on the DAT layout (6 bytes for A, 8 for D, 12 for E).
-            let offset = rec.dat_offset as u64;
+            let offset = u64::from(rec.dat_offset);
+            if offset > entry.dat_size {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: DAT offset {offset} is past the end of \
+                     {}-byte DAT file",
+                    entry.index, entry.dat_size
+                )));
+            }
             let width = match entry.encoding {
                 Encoding::A => 6,
+                Encoding::D => 8,
                 Encoding::E => 12,
-                _ => 8,
             };
             let length = (rec.n_records as u64) * width;
             (offset, length, rec.retention_time_min)
@@ -507,13 +691,26 @@ fn scan_slice(entry: &FunctionEntry, scan_idx: usize) -> crate::Result<(u64, u64
                     entry.index, scan_idx
                 ))
             })?;
-            let offset = rec.dat_offset as u64;
+            let offset = rec.dat_offset;
             let next_offset = records
                 .get(scan_idx + 1)
-                .map(|r| r.dat_offset as u64)
+                .map(|r| r.dat_offset)
                 .unwrap_or(entry.dat_size);
-            let length = next_offset.saturating_sub(offset);
-            (offset, length, rec.retention_time_min)
+            if offset > entry.dat_size || next_offset > entry.dat_size {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: DAT offsets {offset}..{next_offset} \
+                     extend past the end of {}-byte DAT file",
+                    entry.index, entry.dat_size
+                )));
+            }
+            if next_offset < offset {
+                return Err(crate::Error::Parse(format!(
+                    "function {} scan {scan_idx}: next scan's DAT offset {next_offset} \
+                     is before this scan's offset {offset}",
+                    entry.index
+                )));
+            }
+            (offset, next_offset - offset, rec.retention_time_min)
         }
     };
     let remaining = entry.dat_size.saturating_sub(offset);
@@ -535,8 +732,6 @@ pub fn encoding_counts(reader: &Reader) -> BTreeMap<&'static str, usize> {
     for f in &reader.functions {
         let key = match f.encoding {
             Encoding::A => "A",
-            Encoding::B => "B",
-            Encoding::C => "C",
             Encoding::D => "D",
             Encoding::E => "E",
         };
@@ -570,7 +765,7 @@ mod tests {
         let encoding = if matches!(scan_index, ScanIndex::A(_)) {
             Encoding::A
         } else {
-            Encoding::C
+            Encoding::D
         };
         FunctionEntry {
             index: 1,
@@ -586,13 +781,13 @@ mod tests {
 
     // A corrupt/malicious IDX can claim a scan far larger than the real DAT
     // file: dat_offset=0 for this scan, dat_offset=u32::MAX-1 for the "next"
-    // scan used to compute Variant B's length by subtraction. Before this
-    // was capped, `read_slice` would allocate a `Vec` sized from that
-    // difference (up to ~4.29 GB) regardless of how small the real DAT file
-    // on disk actually is - which aborts the process under a virtual-memory
-    // limit rather than returning a recoverable error.
+    // scan used to compute Variant B's length by subtraction. `scan_slice`
+    // must reject it: passing that difference (up to ~4.29 GB) to `read_slice`
+    // would allocate a `Vec` sized from it regardless of how small the real
+    // DAT file is, which aborts the process under a virtual-memory limit
+    // rather than returning a recoverable error.
     #[test]
-    fn variant_b_scan_slice_caps_length_to_dat_size() {
+    fn variant_b_next_offset_beyond_dat_size_is_error() {
         let entry = entry_with(
             ScanIndex::B(vec![
                 ScanIndexB {
@@ -600,19 +795,18 @@ mod tests {
                     retention_time_min: 0.0,
                 },
                 ScanIndexB {
-                    dat_offset: u32::MAX - 1,
+                    dat_offset: u64::from(u32::MAX - 1),
                     retention_time_min: 0.1,
                 },
             ]),
             64, // real DAT file is tiny
         );
-        let (offset, length, _) = scan_slice(&entry, 0).unwrap();
-        assert_eq!(offset, 0);
-        assert!(length <= 64, "length {length} exceeds dat_size 64");
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("past the end"), "{error}");
     }
 
     #[test]
-    fn variant_b_offset_beyond_dat_size_yields_zero_length() {
+    fn variant_b_offset_beyond_dat_size_is_error() {
         let entry = entry_with(
             ScanIndex::B(vec![ScanIndexB {
                 dat_offset: 1_000_000,
@@ -620,8 +814,66 @@ mod tests {
             }]),
             64,
         );
-        let (_, length, _) = scan_slice(&entry, 0).unwrap();
-        assert_eq!(length, 0);
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("past the end"), "{error}");
+    }
+
+    #[test]
+    fn variant_b_backwards_offset_is_error() {
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: 40,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: 8,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            100,
+        );
+        let error = scan_slice(&entry, 0).unwrap_err().to_string();
+        assert!(error.contains("before this scan's offset"), "{error}");
+        // The last scan runs to EOF and is still readable.
+        assert_eq!(scan_slice(&entry, 1).unwrap(), (8, 92, 0.1));
+    }
+
+    // Offsets above 4 GiB (high word at IDX +0x1A) must be used as-is, not
+    // truncated to 32 bits, so the slice lands in the right place of a large
+    // DAT file.
+    #[test]
+    fn variant_b_offsets_above_four_gib_are_used_in_full() {
+        let base = (1u64 << 32) + 1_626_312;
+        let entry = entry_with(
+            ScanIndex::B(vec![
+                ScanIndexB {
+                    dat_offset: base,
+                    retention_time_min: 0.0,
+                },
+                ScanIndexB {
+                    dat_offset: base + 800,
+                    retention_time_min: 0.1,
+                },
+            ]),
+            base + 1000,
+        );
+        assert_eq!(scan_slice(&entry, 0).unwrap(), (base, 800, 0.0));
+        assert_eq!(scan_slice(&entry, 1).unwrap(), (base + 800, 200, 0.1));
+    }
+
+    #[test]
+    fn variant_a_offset_beyond_dat_size_is_error() {
+        let entry = entry_with(
+            ScanIndex::A(vec![ScanIndexA {
+                dat_offset: 1_000,
+                n_records: 1,
+                retention_time_min: 0.0,
+                peak_count: 0,
+            }]),
+            64,
+        );
+        assert!(scan_slice(&entry, 0).is_err());
     }
 
     #[test]
@@ -763,8 +1015,23 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds decoded peak count")]
-    fn peak_count_sanity_panics_when_peak_count_exceeds_decoded_len() {
+    fn peak_count_sanity_does_not_panic_when_peak_count_exceeds_decoded_len() {
+        // File-controlled value: a mismatch is logged, never a panic, in
+        // debug and release builds alike.
         check_peak_count_sanity(1, 0, 100, 5);
+    }
+
+    // A DAT file that passes the size check but cannot be read while sampling
+    // must not fail `Reader::open` for the whole bundle.
+    #[test]
+    fn variant_b_sampling_read_failure_assumes_encoding_d() {
+        let records = vec![ScanIndexB {
+            dat_offset: 0,
+            retention_time_min: 0.0,
+        }];
+        let missing = std::env::temp_dir().join("openwraw-test-missing/_FUNC001.DAT");
+        let (encoding, reason) = variant_b_encoding(1, &missing, &records, 64);
+        assert!(matches!(encoding, Encoding::D));
+        assert!(reason.contains("sampling read failed"), "{reason}");
     }
 }

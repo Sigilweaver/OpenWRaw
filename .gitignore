@@ -26,8 +26,9 @@ tests/.cache/
 corpus/PXD*/
 corpus/index.csv
 
-# CI/local-dev download target for the conformance-test Waters fixture
-# (see .github/workflows/ci.yml and crates/openwraw/tests/conformance.rs)
+# CI/local-dev download target for the Waters fixture used by the python and
+# validate-mzml jobs (see .github/workflows/ci.yml). The rust job unzips it
+# under corpus/PXD058812/ instead.
 /waters.raw.zip
 /ITEM_M11_7_His_tag_01.raw/
 

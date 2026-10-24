@@ -82,6 +82,7 @@ instrument generation; newer firmware adds channels.
 | 52 | Cone | i16 | varies | Cone voltage (V); matches `_extern.inf` Sampling Cone |
 | 62 | Collision Energy | f32 | varies | Per-scan collision energy (eV) |
 | 76/78 | Pusher Frequency / Collision Energy2 | varies | varies | Function-dependent |
+| 77 | Set Mass | f32 | 3 | Precursor m/z of an MS/MS scan; 0 on MS1, MSe and lock-mass scans |
 | 100 | Reference Scan | u8 | varies | 1 if this scan is a lock-mass reference |
 | 101 | Use lock mass correction | u8 | varies | Boolean |
 | 102 | Lock mass correction | f32 | varies | Mass correction applied (Da) |
@@ -95,6 +96,34 @@ instrument generation; newer firmware adds channels.
 
 Not all channels are present in every file. Parse by looking up the
 descriptor list rather than assuming fixed offsets.
+
+## Set Mass (seq 77)
+
+In DDA bundles the `_extern.inf` `Set Mass` of each MS/MS function is 0 or
+a fixed method default, while this channel holds each scan's precursor
+m/z. Every MS/MS scan of every DDA function in the corpus has a non-zero
+value; every MS1, MSe and lock-mass scan has 0.
+
+Cross-check against `_auto.txt`, a plain-text `m/z,time (s)` log of the
+precursors chosen during acquisition, present in 6 corpus bundles. Each
+run of consecutive MS/MS scans with one `Set Mass` value starting within
+30 s after a log entry was matched to it:
+
+| Bundle | `_auto.txt` entries | MS/MS runs | Matched |
+|--------|--------------------:|-----------:|--------:|
+| PXD041695/JLG-1D-ISY-C18_Q0764.raw | 410 | 410 | 410 within 0.5 mDa |
+| PXD041695/JLG-1D-ISY-C8_Q0753.raw | 412 | 412 | 412 within 0.5 mDa |
+| PXD010569/20161025_AV_Dario_Banda_10.raw | 274 | 274 | 274 within 0.5 mDa |
+| PXD010569/20161025_AV_Dario_Banda_3.raw | 273 | 273 | 273 within 0.5 mDa |
+| PXD001123/SiRNA_21-2.raw | 882 | 865 | 865 within 0.5 mDa |
+| PXD029515/blast_young_0h_H1__MSMS.raw | 1217 | 1217 | 1217 within 100 ppm (median +18 ppm) |
+
+In PXD001123, 17 logged precursors have no MS/MS scan. In PXD029515 the
+log and the channel differ by a constant offset of about 18 ppm; the
+channel value is the one reported. PXD003126 and PXD073126 (mobility DDA)
+have no `_auto.txt`, but their MS/MS scans carry the channel the same way.
+For the targeted MS/MS sample PXD035818 the channel reads 884.92 on every
+scan, where `_extern.inf` gives `Set Mass 884.9`.
 
 ## Observed Values
 
@@ -118,7 +147,13 @@ has not yet been confirmed empirically.
 channel lookups by name; `FuncSts::collision_energy(scan_idx)` reads the
 "Collision Energy" channel specifically, and
 `FuncSts::etd_fragmentation_mode(scan_idx)` reads the "ETD Fragmentation
-Mode" channel (seq 121) specifically. `Reader::open` parses every function's
+Mode" channel (seq 121) specifically, and
+`FuncSts::set_mass(scan_idx)` reads the "Set Mass" channel (seq 77), with a
+stored 0 returned as `None`. `Reader::precursor_mz` uses it as the
+precursor m/z of each scan, falling back to the `_extern.inf` `Set Mass`
+(also `None` when 0), and the mzML records write that value as both the
+isolation window target m/z and the selected ion m/z.
+`Reader::open` parses every function's
 `_FUNCnnn.STS` when present (silently `None` if absent or malformed - this
 file is supplementary, not required to decode peak data), and
 `mzml::precursor_info_for` uses it to populate `PrecursorInfo::collision_energy`

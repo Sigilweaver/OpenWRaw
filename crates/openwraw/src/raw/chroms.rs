@@ -1,8 +1,8 @@
-// Parser for _CHROMS.INF and _CHROnnnn.DAT files.
+// Parser for _CHROMS.INF and _CHROnnn.DAT files.
 //
 // _CHROMS.INF describes each recorded instrument channel (pump pressure,
 // flow rate, temperature, etc.) with source type, name, scale factor and units.
-// _CHROnnnn.DAT holds the corresponding (RT, value) time-series for that channel.
+// _CHROnnn.DAT holds the corresponding (RT, value) time-series for that channel.
 
 use std::path::Path;
 
@@ -18,6 +18,7 @@ const CHRO_DATA_OFFSET: usize = 128;
 
 /// Description of a single recorded chromatographic channel from `_CHROMS.INF`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChromChannel {
     /// 0-based index among channel records.
     pub index: usize,
@@ -33,7 +34,9 @@ pub struct ChromChannel {
 
 /// Parsed contents of a `_CHROMS.INF` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChromsInf {
+    /// Channel records in file order.
     pub channels: Vec<ChromChannel>,
 }
 
@@ -78,7 +81,7 @@ impl ChromsInf {
         }
 
         let remaining = bytes.len() - data_start;
-        if remaining % RECORD_SIZE != 0 {
+        if !remaining.is_multiple_of(RECORD_SIZE) {
             return Err(crate::Error::Parse(format!(
                 "_CHROMS.INF: data section size {remaining} is not a multiple of {RECORD_SIZE}"
             )));
@@ -128,8 +131,9 @@ impl ChromsInf {
     }
 }
 
-/// A single (retention-time, value) sample from a `_CHROnnnn.DAT` file.
+/// A single (retention-time, value) sample from a `_CHROnnn.DAT` file.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct ChromPoint {
     /// Retention time in minutes.
     pub rt_min: f32,
@@ -137,7 +141,7 @@ pub struct ChromPoint {
     pub value: f32,
 }
 
-/// Read all (RT, value) samples from a `_CHROnnnn.DAT` file.
+/// Read all (RT, value) samples from a `_CHROnnn.DAT` file.
 pub fn read_chro_dat(path: &Path) -> crate::Result<Vec<ChromPoint>> {
     let bytes = std::fs::read(path)?;
     parse_chro_bytes(&bytes)
@@ -154,7 +158,7 @@ pub fn parse_chro_bytes(bytes: &[u8]) -> crate::Result<Vec<ChromPoint>> {
     }
 
     let data = &bytes[CHRO_DATA_OFFSET..];
-    if data.len() % 8 != 0 {
+    if !data.len().is_multiple_of(8) {
         return Err(crate::Error::Parse(format!(
             "_CHRO*.DAT data section size {} is not a multiple of 8",
             data.len()
@@ -366,7 +370,7 @@ mod tests {
         assert_eq!(ci.channels[0].units, "\u{00B5}L/min"); // µL/min
     }
 
-    // -- _CHROnnnn.DAT tests --
+    // -- _CHROnnn.DAT tests --
 
     fn make_chro_dat(points: &[(f32, f32)]) -> Vec<u8> {
         let mut bytes = vec![0u8; CHRO_DATA_OFFSET];
@@ -431,11 +435,10 @@ mod tests {
 
     #[test]
     fn corpus_ctpa_chroms_inf() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
+        else {
             return;
-        }
+        };
         // PXD068881: 7 channel records, file = 723 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         assert_eq!(ci.channels.len(), 7, "CtpA should have 7 channels");
@@ -457,11 +460,10 @@ mod tests {
 
     #[test]
     fn corpus_ctpa_chro_dat() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD068881/20220517_CtpA_1076_2h_1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD068881/20220517_CtpA_1076_2h_1.raw"])
+        else {
             return;
-        }
+        };
         // _CHRO001.DAT = first channel (BSM System Pressure, channel index 0)
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         let chro_num = ci.chro_number_for_channel(0); // = 1
@@ -478,11 +480,9 @@ mod tests {
 
     #[test]
     fn corpus_dhpr_chroms_inf() {
-        use std::path::Path;
-        let raw = Path::new("/workspaces/OpenWRaw/corpus/PXD075602/DHPR_11257-1.raw");
-        if !raw.exists() {
+        let Some(raw) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
-        }
+        };
         // PXD075602: 5 channel records, file = 553 bytes
         let ci = ChromsInf::from_path(&raw.join("_CHROMS.INF")).unwrap();
         assert_eq!(ci.channels.len(), 5, "DHPR should have 5 channels");

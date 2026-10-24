@@ -1,5 +1,14 @@
 # APEXnnnD.BIN / APEXnnnDIONS.CSV
 
+:::note
+
+OpenWRaw does not read these files and decodes no drift time from them. The
+layout notes below, including any `dt_bin` / `tof_bin` split of a record
+word, are unverified working notes. The same split was shown not to hold for
+`_FUNCnnn.DAT` (see `_FUNCnnn.DAT`).
+
+:::
+
 Files produced by the Waters Apex3D peak-detection algorithm.
 Present only in IMS-MS acquisitions on SYNAPT G2-Si instruments where
 MassLynx post-processing was run (requires Apex3D module installed).
