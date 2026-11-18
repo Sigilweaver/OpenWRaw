@@ -61,7 +61,7 @@ variants.
 | Encoding | Record size | IDX variant | Instruments | Description |
 |----------|-------------|-------------|-------------|-------------|
 | A | 6 bytes  | A (22-byte) | Older QTOF, Q-Tof Premier class | count(u16), m/z word (exponent nibble + u24 mantissa) |
-| D | 8 bytes  | A or B | Vion (UNIFI export), SYNAPT G2/G2-S/G2-Si/XS, Xevo G2-XS, Xevo G3 | intensity (u32 16.16), m/z word (5-bit exponent + 27-bit mantissa) |
+| D | 8 bytes  | A or B | Vion (UNIFI export), SYNAPT G2/G2-S/G2-Si/XS, Xevo G2-XS, Xevo G3 | compressed intensity (u32, as Encoding E), m/z word (5-bit exponent + 27-bit mantissa) |
 | E | 12 bytes | A or B | LCT Premier; some Xevo G2-XS lock-mass functions | compressed intensity, Encoding D m/z word, auxiliary word |
 
 All three store m/z directly and are checked against lock-mass references

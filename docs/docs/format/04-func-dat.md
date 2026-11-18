@@ -9,7 +9,7 @@ DAT records, not of the index: Encodings D and E appear behind both the
 | Encoding | Record size | Index variants | Layout |
 |----------|-------------|----------------|--------|
 | A | 6 bytes  | A    | u16 ion count, floating-point m/z (4-bit exponent, 24-bit mantissa) |
-| D | 8 bytes  | A, B | 16.16 intensity, floating-point m/z (5-bit exponent, 27-bit mantissa) |
+| D | 8 bytes  | A, B | compressed intensity (as Encoding E), floating-point m/z (5-bit exponent, 27-bit mantissa) |
 | E | 12 bytes | A, B | compressed intensity, Encoding D m/z word, auxiliary word |
 
 Every encoding stores an uncalibrated m/z per record; the `_HEADER.TXT`
@@ -97,7 +97,7 @@ Key facts:
 
 | Bytes | Type    | Description |
 |-------|---------|-------------|
-| 0-3   | u32 LE  | Intensity, unsigned 16.16 fixed point (bytes 0-1 are the fraction) |
+| 0-3   | u32 LE  | Compressed intensity word (see below) |
 | 4-7   | u32 LE  | m/z word: 5-bit exponent `E` (bits 27-31), 27-bit mantissa `F` with bit 26 always set |
 
 ```
@@ -106,6 +106,26 @@ mz       = (T1(sqrt(mz_uncal)))^2
 ```
 
 A position word without bit 26 set is a decode error.
+
+The intensity word is the compressed float that Encoding E uses:
+
+```
+mantissa  = u & 0x001fffff         # 21 bits, bit 20 always set
+exponent  = (u >> 22) & 0x1f
+intensity = mantissa * 2^(exponent - 21)
+```
+
+Bit 21 is always clear and bits 27-31 are flags that are not interpreted.
+The decoder returns an error for a nonzero word whose mantissa is zero or
+lacks bit 20, or whose bit 21 is set. An all-zero word is a skipped record.
+
+Evidence (public bundle PXD058812 `ITEM_M11_7_His_tag_01.raw`, SYNAPT G2-S,
+function 1): all 816,140 nonzero intensity words have bit 20 set and bit 21
+clear, and 154,563 of them have nonzero low 16 bits, which are mantissa
+bits. Decoded as above, the profile peak at m/z 650.97 in scan 0 reads
+1974, 6226, 20029, 30594, 17348, 5070, 1831 (a smooth peak, base peak 30594)
+and the single-ion noise sits near the `Average Single Ion Intensity 28`
+recorded in `_extern.inf`.
 
 ### Validation (clean-room)
 
@@ -130,9 +150,7 @@ A position word without bit 26 set is a decode error.
 - In 20 evenly spaced scans of every 8-byte function in the 18 bundles
   above, every record's bytes 4-7 have bit 26 set and m/z never decreases
   within a scan.
-- Bytes 0-1 are non-zero in a minority of records (about 1-55% per
-  function), with values such as `0xFF00` and `0xE000`, consistent with the
-  fraction of a 16.16 intensity.
+- Every nonzero intensity word sampled has bit 20 set and bit 21 clear.
 - Lock mass, median over 20 lock-mass scans, after T1, counting only scans
   where the reference peak's 13C isotope sits one isotope spacing higher
   (`examples/audit_corpus.rs`):

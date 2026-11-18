@@ -66,7 +66,10 @@ fn check_peak_count_sanity(
 pub enum Encoding {
     /// 6-byte records (u16 ion count, floating-point m/z). Variant A index.
     A,
-    /// 8-byte records (16.16 intensity, floating-point m/z). Either index.
+    /// 8-byte records (compressed intensity word, floating-point m/z). The
+    /// intensity word is `mantissa * 2^(exponent - 21)` with a 21-bit
+    /// mantissa and a 5-bit exponent at bits 22-26, as in [`Encoding::E`].
+    /// Either index.
     D,
     /// 12-byte records (compressed intensity, floating-point m/z, auxiliary
     /// word). Either index.

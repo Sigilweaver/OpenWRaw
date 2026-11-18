@@ -108,16 +108,45 @@ fn encoding_d_mz(u: u32) -> crate::Result<f64> {
     Ok(mantissa * 2f64.powi(exponent))
 }
 
+/// Intensity of one compressed intensity word, shared by Encodings D and E.
+///
+/// The word has a 21-bit normalized mantissa (bit 20 always set) and a 5-bit
+/// exponent at bits 22-26: `intensity = mantissa * 2^(exponent - 21)`. Bit 21
+/// is always clear and bits 27-31 carry flags that are not interpreted.
+/// Returns `Ok(None)` when the mantissa is zero (no signal) and an error for
+/// a mantissa without its leading bit or a word with bit 21 set, which the
+/// format does not produce.
+fn decode_intensity_word(word: u32, encoding: &str) -> crate::Result<Option<f32>> {
+    let mantissa = word & 0x001f_ffff;
+    if mantissa == 0 {
+        return Ok(None);
+    }
+    if mantissa & (1 << 20) == 0 || word & (1 << 21) != 0 {
+        return Err(crate::Error::Parse(format!(
+            "{encoding}: unsupported intensity word {word:#010x}"
+        )));
+    }
+    let exponent = ((word >> 22) & 0x1f) as i32;
+    Ok(Some(
+        (f64::from(mantissa) * 2f64.powi(exponent - 21)) as f32,
+    ))
+}
+
 /// Decode one scan slice from an Encoding D `_FUNCnnn.DAT` file.
 ///
 /// Encoding D uses 8-byte records with either index variant (22-byte
-/// Variant A or 30-byte Variant B): bytes 0-3 are intensity as unsigned
-/// 16.16 fixed point and bytes 4-7 are a floating-point m/z word (see
-/// `encoding_d_mz`). The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z),
+/// Variant A or 30-byte Variant B): bytes 0-3 are the compressed intensity
+/// word of Encoding E (see `decode_intensity_word`) and bytes 4-7 are a
+/// floating-point m/z word (see `encoding_d_mz`). The intensity layout is
+/// evidenced by the public PXD058812 bundle ITEM_M11_7_His_tag_01.raw: every
+/// nonzero word has the normalized-mantissa pattern and scan 0 decodes to a
+/// smooth peak at m/z 650.97. The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z),
 /// which is proportional to flight time.
 ///
-/// Records with zero intensity are skipped. A position word without the
-/// leading mantissa bit is an error, not a skipped record.
+/// Records with a zero intensity word are skipped. An intensity word with
+/// no mantissa but other bits set, an intensity word the format cannot
+/// produce, and a position word without the leading mantissa bit are errors,
+/// not skipped records.
 pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
     if !scan_bytes.len().is_multiple_of(8) {
         return Err(crate::Error::Parse(format!(
@@ -131,14 +160,19 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         intensity: Vec::with_capacity(n),
     };
     for rec in scan_bytes.as_chunks::<8>().0 {
-        let intensity = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
-        if intensity == 0 {
+        let word = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
+        if word == 0 {
             continue;
         }
+        let Some(intensity) = decode_intensity_word(word, "Encoding D")? else {
+            return Err(crate::Error::Parse(format!(
+                "Encoding D: intensity word {word:#010x} has no mantissa"
+            )));
+        };
         let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
         let mz = encoding_d_mz(position)?;
         out.mz.push(params.cal.apply(mz.sqrt()).powi(2));
-        out.intensity.push((f64::from(intensity) / 65536.0) as f32);
+        out.intensity.push(intensity);
     }
     Ok(out)
 }
@@ -180,10 +214,10 @@ pub(crate) fn variant_b_record_width(scan_bytes: &[u8]) -> Option<u64> {
 /// Variant B index in the lock-mass functions of some public Xevo G2-XS
 /// bundles.
 ///
-/// The intensity word has a 21-bit normalized mantissa and a 5-bit exponent
-/// at bits 22-26: intensity = mantissa * 2^(exponent - 21). Higher bits are
-/// flags, not part of the exponent. The position word at bytes 4-7 uses the
-/// same floating-point m/z representation as Encoding D. Bytes 8-11 and
+/// The intensity word is the one described at `decode_intensity_word`: a
+/// 21-bit normalized mantissa and a 5-bit exponent at bits 22-26. Higher
+/// bits are flags, not part of the exponent. The position word at bytes 4-7
+/// uses the same floating-point m/z representation as Encoding D. Bytes 8-11 and
 /// the intensity flags are not interpreted; flagged peaks remain present.
 /// Derived from original MTBLS701 and MTBLS13770 bytes and scan-index TIC
 /// self-consistency, without vendor software or vendor-derived output.
@@ -201,21 +235,13 @@ pub fn decode_encoding_e(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
     };
     for rec in scan_bytes.as_chunks::<12>().0 {
         let word = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
-        let mantissa = word & 0x001f_ffff;
-        if mantissa == 0 {
+        let Some(intensity) = decode_intensity_word(word, "Encoding E")? else {
             continue;
-        }
-        if mantissa & (1 << 20) == 0 || word & (1 << 21) != 0 {
-            return Err(crate::Error::Parse(format!(
-                "Encoding E: unsupported intensity word {word:#010x}"
-            )));
-        }
-        let exponent = ((word >> 22) & 0x1f) as i32;
-        let intensity = f64::from(mantissa) * 2f64.powi(exponent - 21);
+        };
         let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
         let mz = encoding_d_mz(position)?;
         out.mz.push(params.cal.apply(mz.sqrt()).powi(2));
-        out.intensity.push(intensity as f32);
+        out.intensity.push(intensity);
     }
     Ok(out)
 }
@@ -272,10 +298,11 @@ mod tests {
     }
 
     #[test]
-    fn enc_d_decodes_fixed_point_intensity_and_skips_zeros() {
+    fn enc_d_decodes_compressed_intensity_and_skips_zeros() {
+        // 831 * 2^11 has bit 20 set; with exponent 9 the value is 831 * 2^-1.
         let scan = bytes_of(&[
             enc_d_record(0, 0x5400_0000),
-            enc_d_record((415 << 16) | 0x8000, 0x5400_0000),
+            enc_d_record((9 << 22) | (831 << 11), 0x5400_0000),
             enc_d_record(0, 0x5800_0000),
         ]);
         let spec = decode_encoding_d(&scan, &test_params()).unwrap();
@@ -291,7 +318,7 @@ mod tests {
             coeffs: vec![0.0, 1.0001],
             cal_type: CalType::T1,
         };
-        let scan = bytes_of(&[enc_d_record(1 << 16, 0x5400_0000)]);
+        let scan = bytes_of(&[enc_d_record(0x0050_0000, 0x5400_0000)]);
         let spec = decode_encoding_d(&scan, &params).unwrap();
         assert!((spec.mz[0] - 512.0 * 1.0001f64.powi(2)).abs() < 1e-9);
     }
@@ -327,15 +354,63 @@ mod tests {
     }
 
     #[test]
-    fn enc_d_decodes_variant_b_records_with_fractional_intensity() {
+    fn enc_d_decodes_variant_b_records_as_compressed_intensity() {
         let scan = bytes_of(&SYNAPT_LOCK_RECORDS);
         let spec = decode_encoding_d(&scan, &test_params()).unwrap();
         assert_eq!(spec.mz.len(), 5);
         // Uncalibrated m/z steps by one ADC sample (about 0.0103 Da here).
         assert!((spec.mz[3] - 556.274_597).abs() < 1e-5, "{}", spec.mz[3]);
         assert!(spec.mz.windows(2).all(|w| w[1] > w[0]));
-        // Bytes 0-1 are the fraction of a 16.16 intensity: 0x0353_c500.
-        assert_eq!(spec.intensity[3], 851.769_53);
+        // Word 0x0353_c500: mantissa 0x13c500 (1,295,616), exponent 13.
+        assert_eq!(spec.intensity[3], 5061.0);
+    }
+
+    /// Seven consecutive records across the base peak of scan 0 of function 1
+    /// in public bundle PXD058812 ITEM_M11_7_His_tag_01.raw (SYNAPT G2-S, ADC
+    /// mode), as stored in `_FUNC001.DAT` at byte offset 29,256.
+    const SYNAPT_PROFILE_RECORDS: [[u8; 8]; 7] = [
+        [0x00, 0xd8, 0xde, 0x02, 0x08, 0xe1, 0x15, 0x55],
+        [0x00, 0x52, 0x58, 0x03, 0xb8, 0xe6, 0x15, 0x55],
+        [0x40, 0x8f, 0xd3, 0x03, 0x68, 0xec, 0x15, 0x55],
+        [0x80, 0xe0, 0xdd, 0x03, 0x18, 0xf2, 0x15, 0x55],
+        [0x00, 0xf1, 0xd0, 0x03, 0xc8, 0xf7, 0x15, 0x55],
+        [0x00, 0xce, 0x53, 0x03, 0x80, 0xfd, 0x15, 0x55],
+        [0x00, 0x9c, 0xdc, 0x02, 0x30, 0x03, 0x16, 0x55],
+    ];
+
+    #[test]
+    fn enc_d_profile_peak_has_physical_shape() {
+        let scan = bytes_of(&SYNAPT_PROFILE_RECORDS);
+        let spec = decode_encoding_d(&scan, &test_params()).unwrap();
+        assert_eq!(
+            spec.intensity,
+            vec![1974.0, 6226.0, 20029.0, 30594.0, 17348.0, 5070.0, 1831.0]
+        );
+        // The apex is the unique maximum with a monotonic flank on each side.
+        let apex = 3;
+        assert!(spec.intensity[..=apex].windows(2).all(|w| w[0] < w[1]));
+        assert!(spec.intensity[apex..].windows(2).all(|w| w[0] > w[1]));
+        assert!(
+            (spec.mz[apex] - 650.972_839).abs() < 1e-5,
+            "{}",
+            spec.mz[apex]
+        );
+    }
+
+    #[test]
+    fn enc_d_rejects_intensity_words_the_format_cannot_produce() {
+        for word in [
+            0x0000_0001, // mantissa without its leading bit
+            0x0030_0000, // bit 21 set
+            0x0400_0000, // flag-only word, no mantissa
+            0x0048_0000, // bit 20 clear
+        ] {
+            let scan = bytes_of(&[enc_d_record(word, 0x5400_0000)]);
+            assert!(
+                decode_encoding_d(&scan, &test_params()).is_err(),
+                "{word:#010x}"
+            );
+        }
     }
 
     #[test]

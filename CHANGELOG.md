@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Encoding D intensities (#59). The 4-byte intensity word was read as 16.16
+  fixed point (word / 65536), which gives roughly the logarithm of the
+  intensity: every peak and the noise floor landed between about 80 and 1000.
+  The word is the compressed float that Encoding E uses (21-bit mantissa,
+  5-bit exponent at bits 22-26, `mantissa * 2^(exponent - 21)`), and D and E
+  now share one decoder that returns a parse error for a word the format
+  cannot produce. Every Encoding D function is affected: SYNAPT G2, G2-S,
+  G2-Si and XS, Vion, Xevo G2-XS and G3, and the non-lock-mass functions of
+  mixed bundles, in the Python API and in mzML output. m/z values and point
+  counts are unchanged. Evidence: public PXD058812
+  `ITEM_M11_7_His_tag_01.raw`, whose scan 0 now has base peak 30594 at m/z
+  650.97 (previously 990).
+
 ## [4.0.0] - 2026-10-11
 
 ### Added
