@@ -99,8 +99,10 @@ quickstart, guide, and format specification.
   functions are reported as MS1.
 - **Polarity is reported only when the bundle records it.** UNIFI exports
   do not, so their spectra have no polarity.
-- **Encoding E** (12-byte records): intensity flag bits and the auxiliary
-  word are not interpreted; flagged peaks are kept. Encoding E spectra are
+- **Encoding D and E**: intensity flag bits (bits 27-31 of the intensity
+  word) are not interpreted; flagged peaks are kept. Both encodings return
+  a parse error for an intensity word the format does not produce.
+- **Encoding E** (12-byte records): the auxiliary word is not interpreted. Encoding E spectra are
   labelled centroid. That is confirmed from point spacing for the Xevo
   G2-XS lock-mass functions but not for LCT Premier bundles.
 - **Tested instruments.** The public test corpus covers Q-Tof, SYNAPT, Vion,

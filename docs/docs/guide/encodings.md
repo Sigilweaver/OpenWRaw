@@ -28,8 +28,10 @@ and `intensity: Vec<f32>`. Every encoding stores an uncalibrated m/z; the
 `_HEADER.TXT` T1 polynomial is applied to sqrt(m/z). No lock-mass correction
 is applied.
 
-Encoding E preserves flagged peaks but does not interpret its intensity
-flags or auxiliary word. It was checked against original public MTBLS701
+Encodings D and E share one intensity word layout. Both preserve flagged
+peaks without interpreting the flags, and both return a parse error for an
+intensity word the format does not produce. Encoding E does not interpret
+its auxiliary word. It was checked against original public MTBLS701
 and MTBLS13770 bytes and against the lock-mass reference in public Xevo
 G2-XS bundles; this does not establish support for every LCT format.
 
