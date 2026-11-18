@@ -398,6 +398,18 @@ mod tests {
     }
 
     #[test]
+    fn enc_d_keeps_flagged_intensity_words() {
+        // Flag bits 27-31 do not change the value.
+        let scan = bytes_of(&[
+            enc_d_record(0x0050_0000, 0x5400_0000),
+            enc_d_record(0x1050_0000, 0x5400_0000),
+            enc_d_record(0xf850_0000, 0x5400_0000),
+        ]);
+        let spec = decode_encoding_d(&scan, &test_params()).unwrap();
+        assert_eq!(spec.intensity, vec![1.0, 1.0, 1.0]);
+    }
+
+    #[test]
     fn enc_d_rejects_intensity_words_the_format_cannot_produce() {
         for word in [
             0x0000_0001, // mantissa without its leading bit

@@ -127,6 +127,12 @@ bits. Decoded as above, the profile peak at m/z 650.97 in scan 0 reads
 and the single-ion noise sits near the `Average Single Ion Intensity 28`
 recorded in `_extern.inf`.
 
+PXD075602 `MAG_20579-50.raw` (Xevo G2-XS, 30-byte index) gives the same
+result: all 22,159,354 nonzero intensity words in its three functions have
+bit 20 set and bit 21 clear, and sampled scans decode without error to a
+median near 20 and a base peak of 42193. No other Encoding D bundle has been
+checked word by word.
+
 ### Validation (clean-room)
 
 22-byte index:

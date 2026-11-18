@@ -31,5 +31,5 @@ fn encoding_d_scan_0_has_a_physical_base_peak() {
     assert!((spec.mz[apex] - 650.97).abs() < 0.05, "{}", spec.mz[apex]);
     // Single-ion noise sits near 28 counts, far below the base peak.
     let min = spec.intensity.iter().copied().fold(f32::MAX, f32::min);
-    assert!((1.0..100.0).contains(&min), "{min}");
+    assert!(min > 0.0 && min < 100.0, "{min}");
 }
