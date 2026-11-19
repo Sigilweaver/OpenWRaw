@@ -20,8 +20,8 @@ abstract: >
   mobility is not decoded.
 license: "Apache-2.0"
 license-url: "https://github.com/Sigilweaver/OpenWRaw/blob/main/LICENSE"
-date-released: "2026-10-11"
-version: "4.0.0"
+date-released: "2026-11-19"
+version: "4.0.1"
 keywords:
   - mass spectrometry
   - proteomics

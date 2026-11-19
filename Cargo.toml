@@ -4,7 +4,7 @@ members = ["crates/openwraw", "crates/openwraw-py"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "4.0.0"
+version = "4.0.1"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Nathan Riley <git@nathanriley.com>"]
