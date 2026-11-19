@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-11-19
+
 ### Fixed
 
 - Encoding D intensities (#59). The 4-byte intensity word was read as 16.16
