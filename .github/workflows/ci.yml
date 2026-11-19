@@ -14,7 +14,8 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   # Small public Waters MassLynx .raw bundle (~5 MB zipped) from PRIDE
-  # PXD058812, used by the rust job's conformance test, the python job's
+  # PXD058812, used by the rust job's conformance and Encoding D intensity
+  # tests, the python job's
   # pytest suite, and the mzML schema-validation job. Waters .raw is a
   # directory bundle, distributed on PRIDE as a .raw.zip.
   WATERS_ZIP_URL: >-
