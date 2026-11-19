@@ -59,21 +59,21 @@ jobs:
           unzip -q waters.raw.zip -d corpus/PXD058812
           test -d "corpus/PXD058812/$WATERS_BUNDLE" || (echo "expected bundle dir corpus/PXD058812/$WATERS_BUNDLE missing" && exit 1)
 
-      # Only the conformance bundle is fetched, so the other corpus tests
+      # Only the PXD058812 bundle is fetched, so the other corpus tests
       # skip here; REQUIRE_CORPUS is not set for this step.
       - name: cargo test
         env:
           OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
         run: cargo test --workspace
 
-      # This job fetched the conformance bundle, so a missing bundle must
-      # fail instead of skipping.
-      - name: cargo test (conformance, corpus required)
+      # The downloaded bundle backs the conformance and Encoding D intensity
+      # tests, so a missing bundle must fail instead of skipping.
+      - name: cargo test (PXD058812 tests, corpus required)
         if: runner.os != 'Windows'
         env:
           OPENWRAW_CORPUS: ${{ github.workspace }}/corpus
           REQUIRE_CORPUS: "1"
-        run: cargo test -p openwraw --test conformance
+        run: cargo test -p openwraw --test conformance --test encoding_d_intensity
 
   python:
     name: python (${{ matrix.os }})
