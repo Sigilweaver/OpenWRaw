@@ -101,7 +101,12 @@ quickstart, guide, and format specification.
   do not, so their spectra have no polarity.
 - **Encoding D and E**: intensity flag bits (bits 27-31 of the intensity
   word) are not interpreted; flagged peaks are kept. Both encodings return
-  a parse error for an intensity word the format does not produce.
+  a parse error for an intensity word the format does not produce, except
+  that Encoding D reads the word `0x20000000` (flag bit 29 only, no mantissa)
+  as a flagged zero intensity and keeps the point with intensity 0.0. That
+  reading rests on the neighbouring records in two public bundles
+  (PXD053170), not on a documented meaning of the flag. Encoding E has not
+  been observed with that word.
 - **Encoding E** (12-byte records): the auxiliary word is not interpreted. Encoding E spectra are
   labelled centroid. That is confirmed from point spacing for the Xevo
   G2-XS lock-mass functions but not for LCT Premier bundles.

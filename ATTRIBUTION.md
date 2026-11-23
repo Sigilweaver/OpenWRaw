@@ -72,6 +72,48 @@ field descriptors within the header, not 85-byte records after it.
 Corresponding native CHRO time series were checked for finite values,
 ordered retention times and one-to-one channel numbering.
 
+## Encoding D flag-only intensity word evidence (PXD053170)
+
+The reading of the intensity word `0x20000000` as a flagged zero was derived
+from native bytes of the public bundles below, without vendor software, SDKs,
+converted spectra or contributor uploads. The local copies were fetched from
+the PRIDE archive on 2026-09-25 and are kept outside tracked source. Every
+function of the 69 public corpus bundles with Encoding D or E functions was
+scanned word by word; `0x20000000` is the only mantissa-zero intensity word
+in them.
+
+| Accession | File | Observation | SHA-256 |
+|-----------|------|-------------|---------|
+| [PXD053170](https://www.ebi.ac.uk/pride/archive/projects/PXD053170) | `20231113_NSE_Sample_High.raw/_FUNC001.DAT` (Xevo G2-XS, Encoding D) | 354,291,049 records; 419 are `0x20000000`, in 302 scans, none first or last in its scan; each has a flagged neighbour | `4da178c7fd2297115e398b7a5cc8e00ba47c46a5fd9b6dd5f03d5707f522c79f` |
+| PXD053170 | `20231113_NSE_Sample_High.raw/_FUNC001.IDX` | scan offsets used to cut the scans | `db2ddc35ce00ca08df40a5281c5e7b4fd131b69a9f53cb0adbd129dacf43891d` |
+| PXD053170 | `20231113_NSE_Sample_NDS.raw/_FUNC001.DAT` (Xevo G2-XS, Encoding D) | 351,930,995 records; 345 are `0x20000000`, in 282 scans, none first or last; each has a flagged neighbour | `991ddad9bd801619cb86d6aa92259e08ed78a0cf6bef568e5852c6b026f5e897` |
+| PXD053170 | `20231113_NSE_Sample_NDS.raw/_FUNC001.IDX` | scan offsets used to cut the scans | `8e171da80cc96433402cc1fdb4c2e2c2ecb563d4bc15611de253f35399b16d74` |
+
+Observations behind the reading, from those files:
+
+- The word has no mantissa and no exponent, only bit 29 of the flag bits
+  27-31. Bit 29 alone is also set on 337,489 valid words in High and 300,725
+  in NDS; their decoded intensities (median 307 against 21 for
+  unflagged words in the first 150 scans of High) form the sides and apex of
+  profile peaks, for example 4, 19, `0x20000000`, 297, 787, 54 in function 1
+  scan 91 (counting from 0) of High. Ignoring the flag gives a smooth peak,
+  so the flag is not part of the value. Read as 16.16 fixed point, bit 29
+  would add exactly 8192 to every flagged point and the word would read
+  8192.0, against under 2048 for any unflagged word, so that reading is not
+  plausible either.
+- Records are consecutive ADC samples inside a run and runs are bracketed by
+  `0x00000000` words. Plain zero words also occur inside flagged runs (1,198
+  between two flagged records in High). The neighbours of `0x20000000` and of
+  a plain zero word with the same flag context have the same magnitudes:
+  larger neighbour median 451 against 241 and smaller neighbour median 20
+  against 14 between two flagged records in High; 440 against 214 and 15
+  against 13 in NDS.
+- What bit 29 means (peak membership, a correction, a detector condition) is
+  not established by these files.
+
+The PXD053170 files are public; per-dataset terms apply and the raw files are
+not redistributed.
+
 ## Third-party Rust dependencies
 
 The OpenWRaw core (`openwraw`) crate has no
