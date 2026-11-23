@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Migration: [MIGRATING-5.0.md](MIGRATING-5.0.md), and Core's
+[MIGRATING-4.0.md](https://github.com/Sigilweaver/OpenMassSpecCore/blob/main/MIGRATING-4.0.md).
+
+### Changed
+
+- **Breaking (Python):** requires Python 3.10 or newer (was 3.8), and the
+  wheel is built as one abi3 wheel for 3.10.
+- **Breaking (Rust):** requires `openmassspec-core` 4.0. `WatersSource` and
+  the records it yields are Core 4 types.
+- **Breaking (Python):** the record dict follows Core 4. The `precursor` keys
+  `collision_energy` and `ce_is_nce` are replaced by `collision_energies`, a
+  list of `{"value", "unit"}` (`unit` is `"ev"`, `"nce"` or `None`); the list
+  is absent when empty. `analyzer` is `"tof"` (was `"tofms"`). `scan_mode` is
+  `None` when unknown. `run_info()` carries `time_axis`.
+- **Breaking (Rust):** `Encoding::is_centroided` is replaced by
+  `FunctionEntry::is_centroided`, which returns `Option<bool>`.
+  `ExternFunction` has a new field `collision_energy_labelled_ev`.
+- The mzML writer refuses what it used to write: a spectrum with no scan
+  mode, a collision energy with no unit, a NaN in a chromatogram. See
+  "Known issues and gaps" in the README for the cases and the Core check names
+  that let them through.
+
+### Fixed
+
+- Collision energy. MS/MS records stated the STS "Collision Energy" channel as
+  eV whatever the bundle said. A function whose `_extern.inf` section records
+  a collision-energy ramp (the MSe and HDMSe high-energy functions of 11
+  public bundles, and the DDA functions of PXD003126 and PXD029515) has only
+  the ramp start in that channel, so every scan read the start (15.0 for a 15
+  to 40 eV ramp). A function with a "Collision Energy2" channel has a trap
+  and a transfer value, and the record carried the first (4.0 on every MS/MS
+  scan of PXD073126, whose transfer energy runs from 22 to 44). Both cases now
+  state no collision energy and keep the reason under
+  `openwraw.collision_energy_unstated`; the raw channels stay under
+  `openwraw.sts.*`. A single-channel function states its energy in eV when its
+  `_extern.inf` section labels a collision energy `(eV)`, and with no unit
+  otherwise (PXD010569).
+- Encoding E behind the 22-byte index (LCT Premier) is no longer labelled
+  centroid. Its point spacing has not been checked, so the scan mode is
+  unknown.
+- An MS/MS record with an activation but no precursor m/z and no collision
+  energy (the MSe high-energy function) keeps its `<precursor>` with the
+  activation.
+
 ## [4.0.2] - 2026-11-26
 
 ### Fixed

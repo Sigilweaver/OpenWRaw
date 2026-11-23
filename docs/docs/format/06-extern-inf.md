@@ -155,6 +155,15 @@ The three ramp spellings are parsed into
 `ExternFunction::collision_energy_ramp_ev = Some((start, end))` when
 `end > start` (a `0.0` to `0.0` ramp is no ramp).
 
+A section also states the unit of its collision energies when a field's label
+contains `Collision Energy` and `(eV)`, for example
+`Using Auto Trap Collision Energy (eV)  4.000000` or
+`MS Collision Energy (eV)  4.0`. `ExternFunction::collision_energy_labelled_ev`
+is true for those sections. Older Q-Tof sections have only
+`Collision Energy  10.0` with no unit, and `Parent Survey High CE (V)` is a
+voltage, not a collision energy. The `_FUNCnnn.STS` channels carry no unit,
+so this label is the only statement of one in the bundle.
+
 No charge state or isolation-width field has been found on any function
 type in any corpus sample; `Set Mass` is the only precursor field
 `_extern.inf` exposes. Per-scan collision energy for MS/MS-classified
