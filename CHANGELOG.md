@@ -36,9 +36,10 @@ Migration: [MIGRATING-5.0.md](MIGRATING-5.0.md), and Core's
   a collision-energy ramp (the MSe and HDMSe high-energy functions of 11
   public bundles, and the DDA functions of PXD003126 and PXD029515) has only
   the ramp start in that channel, so every scan read the start (15.0 for a 15
-  to 40 eV ramp). A function with a "Collision Energy2" channel has a trap
-  and a transfer value, and the record carried the first (4.0 on every MS/MS
-  scan of PXD073126, whose transfer energy runs from 22 to 44). Both cases now
+  to 40 eV ramp). A function with a "Collision Energy2" channel (3 public
+  bundles) has a trap and a transfer value, and the record carried the first
+  (4.0 on every MS/MS scan of PXD073126, whose transfer energy runs from 22
+  to 44). Both cases now
   state no collision energy and keep the reason under
   `openwraw.collision_energy_unstated`; the raw channels stay under
   `openwraw.sts.*`. A single-channel function states its energy in eV when its
