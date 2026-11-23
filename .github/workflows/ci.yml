@@ -51,10 +51,21 @@ jobs:
 
       # Corpus-gated tests read bundles under OPENWRAW_CORPUS as
       # <root>/<accession>/<bundle>.raw (see crates/openwraw/src/test_corpus.rs).
+      - name: Cache Waters sample
+        if: runner.os != 'Windows'
+        uses: actions/cache@v6
+        with:
+          path: waters.raw.zip
+          key: waters-PXD058812-ITEM_M11_7_His_tag_01-v1
+
       - name: Download and unzip Waters sample
         if: runner.os != 'Windows'
+        timeout-minutes: 5
         run: |
-          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          if [ ! -s waters.raw.zip ]; then
+            wget -q --tries=4 --timeout=30 --waitretry=5 --retry-connrefused \
+              --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          fi
           mkdir -p corpus/PXD058812
           unzip -q waters.raw.zip -d corpus/PXD058812
           test -d "corpus/PXD058812/$WATERS_BUNDLE" || (echo "expected bundle dir corpus/PXD058812/$WATERS_BUNDLE missing" && exit 1)
@@ -121,10 +132,21 @@ jobs:
       - name: Smoke import
         run: ${{ env.VENV_PYTHON }} -c "import openwraw; print(openwraw.__name__)"
 
+      - name: Cache Waters sample
+        if: runner.os != 'Windows'
+        uses: actions/cache@v6
+        with:
+          path: waters.raw.zip
+          key: waters-PXD058812-ITEM_M11_7_His_tag_01-v1
+
       - name: Download and unzip Waters sample
         if: runner.os != 'Windows'
+        timeout-minutes: 5
         run: |
-          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          if [ ! -s waters.raw.zip ]; then
+            wget -q --tries=4 --timeout=30 --waitretry=5 --retry-connrefused \
+              --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          fi
           unzip -q waters.raw.zip
           test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
 
@@ -183,9 +205,19 @@ jobs:
       - name: Ensure xmllint is available
         run: command -v xmllint || (sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils)
 
+      - name: Cache Waters sample
+        uses: actions/cache@v6
+        with:
+          path: waters.raw.zip
+          key: waters-PXD058812-ITEM_M11_7_His_tag_01-v1
+
       - name: Download and unzip Waters sample
+        timeout-minutes: 5
         run: |
-          wget -q --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          if [ ! -s waters.raw.zip ]; then
+            wget -q --tries=4 --timeout=30 --waitretry=5 --retry-connrefused \
+              --user-agent="OpenWRaw-CI/1.0" -O waters.raw.zip "$WATERS_ZIP_URL"
+          fi
           echo "Downloaded $(du -sh waters.raw.zip | cut -f1) zip"
           unzip -q waters.raw.zip
           test -d "$WATERS_BUNDLE" || (echo "expected bundle dir $WATERS_BUNDLE missing" && exit 1)
