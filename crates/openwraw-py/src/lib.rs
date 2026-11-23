@@ -77,34 +77,8 @@ fn normalize_record_json(value: &mut serde_json::Value) {
                 }
             }
         }
-        for (key, field) in fields {
-            match key.as_str() {
-                "polarity" | "scan_mode" | "analyzer" | "activation" => {
-                    if let Some(text) = field.as_str() {
-                        *field = serde_json::Value::String(text.to_ascii_lowercase());
-                    }
-                }
-                "mobility_array_kind" => {
-                    if let Some(text) = field.as_str() {
-                        let normalized = match text {
-                            "InverseReducedVsPerCm2" => "inverse_reduced_k0",
-                            "DriftTimeMilliseconds" => "drift_time_ms",
-                            other => other,
-                        };
-                        *field = serde_json::Value::String(normalized.to_string());
-                    }
-                }
-                "analyzers" => {
-                    if let Some(items) = field.as_array_mut() {
-                        for item in items {
-                            if let Some(text) = item.as_str() {
-                                *item = serde_json::Value::String(text.to_ascii_lowercase());
-                            }
-                        }
-                    }
-                }
-                _ => normalize_record_json(field),
-            }
+        for field in fields.values_mut() {
+            normalize_record_json(field);
         }
     }
 }
@@ -543,6 +517,12 @@ impl RawReader {
     /// Collision energy, ETD mode and precursor m/z decoded for a scan
     /// (`_FUNCnnn.STS`, with the `_extern.inf` set mass as the precursor
     /// fallback). Values the bundle does not record are `None`.
+    ///
+    /// `collision_energy_ev` is the "Collision Energy" channel as stored. On
+    /// a function with a collision-energy ramp it is the start of the ramp,
+    /// and on a trap and transfer instrument it is the trap value. The
+    /// energy the bundle states for the scan is
+    /// `read_record(...)["precursor"]["collision_energies"]`.
     fn scan_parameters<'py>(
         &self,
         py: Python<'py>,

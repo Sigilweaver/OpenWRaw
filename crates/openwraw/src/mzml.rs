@@ -232,10 +232,62 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
     .with_extra_map(extra)
 }
 
+/// What the bundle states about the collision energy of one function's
+/// scans.
+#[derive(Debug, Clone, PartialEq)]
+enum CollisionEnergyStatement {
+    /// The `_FUNCnnn.STS` "Collision Energy" channel holds each scan's
+    /// energy. The unit is `Some(Ev)` only when the function's `_extern.inf`
+    /// section labels a collision energy `(eV)`; the STS file records no
+    /// unit.
+    PerScan(Option<msc::CollisionEnergyUnit>),
+    /// The bundle does not give one energy per scan. The reason is kept in
+    /// the record's `extra` map.
+    Unstated(String),
+}
+
+/// Decide what collision energy the bundle states for a function's scans.
+///
+/// * A function whose `_extern.inf` section records a collision-energy ramp
+///   has no single energy per scan: the STS channel holds the start of the
+///   ramp (every scan of DHPR_11257-1 function 2 reads 15.0 for a 15 to 40
+///   eV ramp).
+/// * A function whose STS file has a second channel, "Collision Energy2",
+///   has two collision energies per scan. On trap and transfer instruments
+///   the channels hold the trap and the transfer value (4.0 and 27.0 for
+///   the 27 to 47 eV transfer ramp of PXD071342 function 2), and nothing in
+///   the bundle says which cell fragments the precursor.
+/// * Otherwise the "Collision Energy" channel is the energy of the scan.
+fn collision_energy_statement(reader: &Reader, function_index: u32) -> CollisionEnergyStatement {
+    let ext = reader.extern_inf.functions.get(&function_index);
+    if let Some((start, end)) = ext.and_then(|f| f.collision_energy_ramp_ev) {
+        return CollisionEnergyStatement::Unstated(format!(
+            "collision-energy ramp {start} to {end}; the STS channel holds only its start"
+        ));
+    }
+    let two_channels = reader
+        .functions
+        .iter()
+        .find(|f| f.index == function_index)
+        .and_then(|f| f.sts.as_ref())
+        .is_some_and(|sts| sts.channel("Collision Energy2").is_some());
+    if two_channels {
+        return CollisionEnergyStatement::Unstated(
+            "two collision-energy channels (Collision Energy, Collision Energy2); \
+             the bundle does not say which cell fragments the precursor"
+                .into(),
+        );
+    }
+    CollisionEnergyStatement::PerScan(
+        ext.is_some_and(|f| f.collision_energy_labelled_ev)
+            .then_some(msc::CollisionEnergyUnit::Ev),
+    )
+}
+
 /// Build a spectrum's `PrecursorInfo`, or `None` for MS1 (and any other
 /// spectrum this reader has no precursor information for at all).
 ///
-/// Two independent sources feed this:
+/// Three independent sources feed this:
 /// * the precursor m/z from [`Reader::precursor_mz`] (the scan's
 ///   `_FUNCnnn.STS` "Set Mass" channel for data-dependent MS/MS, else the
 ///   function's `_extern.inf` `Set Mass` for targeted MS/MS). It is written
@@ -243,11 +295,11 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
 ///   and HDMSe functions (broadband fragmentation, `Precursor Selection:
 ///   Everything`) have no discrete precursor, and a stored set mass of 0
 ///   is no precursor, so neither is written for them.
-/// * `collision_energy` from `_FUNCnnn.STS`'s per-scan "Collision Energy"
-///   channel, which is independent of the precursor m/z and is populated
-///   for MSe functions too.
+/// * the collision energy and its unit, from
+///   [`collision_energy_statement`]. `None` when the bundle states none.
+/// * the activation from `_FUNCnnn.STS`'s ETD fragmentation mode channel.
 ///
-/// Returns `None` (rather than `Some` with every field `None`) when neither
+/// Returns `None` (rather than `Some` with every field `None`) when no
 /// source has anything to report, so a spectrum with genuinely no precursor
 /// information has no `<precursor>` element.
 ///
@@ -257,22 +309,23 @@ fn run_metadata_for(reader: &Reader) -> msc::RunMetadata {
 fn precursor_info_for(
     ms_level: u32,
     precursor_mz: Option<f64>,
-    collision_energy_ev: Option<f64>,
+    collision_energy: Option<f64>,
+    collision_energy_unit: Option<msc::CollisionEnergyUnit>,
     etd_fragmentation_mode: Option<f64>,
 ) -> Option<msc::PrecursorInfo> {
     if ms_level < 2 {
         return None;
     }
-    if precursor_mz.is_none() && collision_energy_ev.is_none() {
+    let activation = activation_for(etd_fragmentation_mode);
+    if precursor_mz.is_none() && collision_energy.is_none() && activation.is_none() {
         return None;
     }
     Some(
         msc::PrecursorInfo::default()
             .with_target_mz(precursor_mz)
             .with_selected_mz(precursor_mz)
-            .with_collision_energy(collision_energy_ev)
-            .with_ce_is_nce(false)
-            .with_activation(activation_for(etd_fragmentation_mode)),
+            .with_collision_energy(collision_energy, collision_energy_unit)
+            .with_activation(activation),
     )
 }
 
@@ -419,18 +472,24 @@ pub fn record_from_scan(
     let (mz, intensity) = (spectrum.mz, spectrum.intensity);
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
     let ms_level = reader.ms_level(function_index);
+    let ce_statement = collision_energy_statement(reader, function_index);
+    let (collision_energy, collision_energy_unit) = match &ce_statement {
+        CollisionEnergyStatement::PerScan(unit) => (collision_energy_ev, *unit),
+        CollisionEnergyStatement::Unstated(_) => (None, None),
+    };
     let precursor = precursor_info_for(
         ms_level,
         precursor_mz,
-        collision_energy_ev,
+        collision_energy,
+        collision_energy_unit,
         etd_fragmentation_mode,
     );
     let function = reader.functions.iter().find(|f| f.index == function_index);
     // Profile or centroid follows the record encoding; see
-    // `Encoding::is_centroided`. A function the reader does not list has no
-    // known encoding, so no representation is claimed.
-    let scan_mode = function.map(|f| {
-        if f.encoding.is_centroided() {
+    // `FunctionEntry::is_centroided`. A function the reader does not list,
+    // or whose encoding does not settle it, has no known representation.
+    let scan_mode = function.and_then(|f| f.is_centroided()).map(|centroided| {
+        if centroided {
             msc::ScanMode::Centroid
         } else {
             msc::ScanMode::Profile
@@ -439,6 +498,9 @@ pub fn record_from_scan(
     let mut extra = ::std::collections::BTreeMap::new();
     extra.insert("openwraw.function_index".into(), function_index.to_string());
     extra.insert("openwraw.scan_index".into(), scan_idx.to_string());
+    if let (CollisionEnergyStatement::Unstated(reason), true) = (&ce_statement, ms_level >= 2) {
+        extra.insert("openwraw.collision_energy_unstated".into(), reason.clone());
+    }
     if let Some(function) = function {
         if let Some(sts) = &function.sts {
             for channel in sts.channels() {
@@ -717,15 +779,16 @@ mod tests {
                 rec.scan_number
             );
             assert_eq!(precursor.selected_mz, Some(mz));
-            assert!(!precursor.ce_is_nce);
         }
     }
 
     // Sigilweaver/OpenWRaw#8: broadband HDMSe has no discrete precursor
-    // (`Precursor Selection: Everything`), so target_mz must stay None even
-    // though collision_energy is available from `_FUNCnnn.STS`.
+    // (`Precursor Selection: Everything`), so target_mz stays None. Its
+    // high-energy function ramps the collision energy from 15 to 40 eV and
+    // the STS channel holds only the ramp start (15.0 on every scan), so no
+    // collision energy is stated and the reason is kept on the record.
     #[test]
-    fn corpus_pxd075602_hdmse_has_collision_energy_but_no_target_mz() {
+    fn corpus_pxd075602_hdmse_ramp_states_no_collision_energy() {
         let Some(dir) = crate::test_corpus::bundle(&["PXD075602/DHPR_11257-1.raw"]) else {
             return;
         };
@@ -744,11 +807,72 @@ mod tests {
                 rec.scan_number
             );
             assert!(
-                precursor.collision_energy.is_some(),
-                "HDMSe scan {} should still report collision_energy from _FUNCnnn.STS",
+                precursor.collision_energies.is_empty(),
+                "HDMSe scan {} sits on a 15 to 40 eV ramp",
                 rec.scan_number
             );
+            assert_eq!(precursor.activation, Some(msc::Activation::CID));
+            let note = rec
+                .extra
+                .get("openwraw.collision_energy_unstated")
+                .unwrap_or_else(|| panic!("scan {} has no unstated note", rec.scan_number));
+            assert!(note.contains("ramp 15 to 40"), "{note}");
+            // The raw STS channel stays on the record.
+            assert_eq!(
+                rec.extra.get("openwraw.sts.62.Collision Energy"),
+                Some(&"15".to_string())
+            );
         }
+    }
+
+    // A function with one collision cell and no ramp: the STS channel is the
+    // energy of each scan, and the section labels it `(eV)`.
+    #[test]
+    fn corpus_pxd041695_dda_states_collision_energy_in_ev() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD041695/JLG-1D-ISY-C18_Q0764.raw"]) else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        let scan = reader.decode_scan(2, 0).unwrap();
+        let sts_value = scan.collision_energy_ev.expect("STS collision energy");
+        let rec = record_from_scan(&reader, 1, scan);
+        let ce = rec.precursor.expect("precursor").collision_energies;
+        assert_eq!(ce.len(), 1);
+        assert_eq!(ce[0].value, sts_value);
+        assert_eq!(ce[0].unit, Some(msc::CollisionEnergyUnit::Ev));
+    }
+
+    // Trap and transfer instrument: the STS file has "Collision Energy" (3.0)
+    // and "Collision Energy2" (2.0), and nothing says which cell fragments.
+    #[test]
+    fn corpus_pxd035818_two_collision_cells_state_no_collision_energy() {
+        let Some(dir) =
+            crate::test_corpus::bundle(&["PXD035818/17122018_TNFA_PEPTIDE_GSHH_MSMS_884.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        for rec in collect_records(&reader).unwrap() {
+            let precursor = rec.precursor.expect("precursor");
+            assert!(precursor.collision_energies.is_empty());
+            assert!(rec.extra.contains_key("openwraw.collision_energy_unstated"));
+        }
+    }
+
+    // Older Q-Tof DDA bundle: the section has `Collision Energy 10.0` with no
+    // unit in the label, so the energies are written without one.
+    #[test]
+    fn corpus_pxd010569_unlabelled_collision_energy_has_no_unit() {
+        let Some(dir) = crate::test_corpus::bundle(&["PXD010569/20161025_AV_Dario_Banda_10.raw"])
+        else {
+            return;
+        };
+        let reader = Reader::open(&dir).unwrap();
+        let rec = record_from_scan(&reader, 1, reader.decode_scan(2, 0).unwrap());
+        let ce = rec.precursor.expect("precursor").collision_energies;
+        assert_eq!(ce.len(), 1);
+        assert!(ce[0].value > 0.0);
+        assert_eq!(ce[0].unit, None);
     }
 
     fn reader_with_functions(functions: &[(Encoding, u8)]) -> Reader {
@@ -877,6 +1001,137 @@ mod tests {
         let precursor = rec.precursor.expect("precursor");
         assert_eq!(precursor.target_mz, Some(823.7629));
         assert_eq!(precursor.selected_mz, Some(823.7629));
+    }
+
+    /// A `_FUNCnnn.STS` with one f32 channel per `(seq, name)` and one scan
+    /// holding `values`.
+    fn sts_with_channels(channels: &[(u16, &str, f32)]) -> crate::raw::func_sts::FuncSts {
+        let data_offset = 32 + 48 * channels.len();
+        let mut bytes = vec![0u8; 32];
+        bytes[0..2].copy_from_slice(&(data_offset as u16).to_le_bytes());
+        bytes[2..4].copy_from_slice(&1u16.to_le_bytes());
+        bytes[4..6].copy_from_slice(&((4 * channels.len()) as u16).to_le_bytes());
+        bytes[6..8].copy_from_slice(&(channels.len() as u16).to_le_bytes());
+        for (i, (seq, name, _)) in channels.iter().enumerate() {
+            let mut d = vec![0u8; 48];
+            d[0..2].copy_from_slice(&seq.to_le_bytes());
+            d[2..4].copy_from_slice(&3u16.to_le_bytes());
+            d[4..6].copy_from_slice(&((4 * i) as u16).to_le_bytes());
+            d[6..6 + name.len()].copy_from_slice(name.as_bytes());
+            bytes.extend(d);
+        }
+        for (_, _, value) in channels {
+            bytes.extend(value.to_le_bytes());
+        }
+        crate::raw::func_sts::FuncSts::from_bytes(&bytes).unwrap()
+    }
+
+    fn msms_scan(collision_energy_ev: f64) -> DecodedScan {
+        let mut scan = scan_with_precursor(Some(500.25));
+        scan.collision_energy_ev = Some(collision_energy_ev);
+        scan
+    }
+
+    #[test]
+    fn collision_energy_unit_follows_the_section_label() {
+        let reader = reader_with_extern(
+            3,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 2 - TOF MSMS FUNCTION\n\
+             Using Auto Trap Collision Energy (eV)\t4.000000\n\
+             Function Parameters - Function 3 - TOF MSMS FUNCTION\n\
+             Collision Energy\t10.0\n",
+        );
+        let ce = |function_index: u32| {
+            let mut scan = msms_scan(12.5);
+            scan.function_index = function_index;
+            let rec = record_from_scan(&reader, 1, scan);
+            assert_eq!(rec.ms_level, 2);
+            assert!(!rec.extra.contains_key("openwraw.collision_energy_unstated"));
+            rec.precursor.unwrap().collision_energies
+        };
+        let labelled = ce(2);
+        assert_eq!(labelled.len(), 1);
+        assert_eq!(labelled[0].value, 12.5);
+        assert_eq!(labelled[0].unit, Some(msc::CollisionEnergyUnit::Ev));
+        let unlabelled = ce(3);
+        assert_eq!(unlabelled.len(), 1);
+        assert_eq!(unlabelled[0].unit, None);
+    }
+
+    #[test]
+    fn ramped_function_states_no_collision_energy() {
+        let reader = reader_with_extern(
+            2,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 2 - TOF MSMS FUNCTION\n\
+             Collision Energy Ramp Start (eV)\t20.0\n\
+             Collision Energy Ramp End (eV)\t40.0\n",
+        );
+        let rec = record_from_scan(&reader, 1, msms_scan(20.0));
+        assert_eq!(rec.ms_level, 2);
+        let precursor = rec.precursor.expect("precursor m/z is still written");
+        assert_eq!(precursor.selected_mz, Some(500.25));
+        assert!(precursor.collision_energies.is_empty());
+        let note = &rec.extra["openwraw.collision_energy_unstated"];
+        assert!(note.contains("ramp 20 to 40"), "{note}");
+    }
+
+    #[test]
+    fn two_cell_function_states_no_collision_energy() {
+        let mut reader = reader_with_extern(
+            2,
+            "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 2 - TOF MSMS FUNCTION\n\
+             Using Auto Trap Collision Energy (eV)\t4.000000\n",
+        );
+        reader.functions[1].sts = Some(sts_with_channels(&[
+            (62, "Collision Energy", 4.0),
+            (78, "Collision Energy2", 27.0),
+        ]));
+        let rec = record_from_scan(&reader, 1, msms_scan(4.0));
+        assert!(rec
+            .precursor
+            .expect("precursor")
+            .collision_energies
+            .is_empty());
+        assert!(rec.extra["openwraw.collision_energy_unstated"].contains("Collision Energy2"));
+        // Both raw channels stay on the record.
+        assert_eq!(rec.extra["openwraw.sts.62.Collision Energy"], "4");
+        assert_eq!(rec.extra["openwraw.sts.78.Collision Energy2"], "27");
+    }
+
+    #[test]
+    fn single_cell_function_keeps_its_energy() {
+        let mut reader = reader_with_extern(2, "Lteff 1800\nVeff 7200");
+        reader.functions[1].sts = Some(sts_with_channels(&[(62, "Collision Energy", 15.0)]));
+        let rec = record_from_scan(&reader, 1, msms_scan(15.0));
+        assert_eq!(rec.precursor.unwrap().collision_energies[0].value, 15.0);
+    }
+
+    #[test]
+    fn scan_mode_follows_encoding_and_leaves_lct_unknown() {
+        use crate::raw::index::ScanIndex;
+        let mut reader = reader_with_functions(&[
+            (Encoding::A, 0),
+            (Encoding::D, 0),
+            (Encoding::E, 0),
+            (Encoding::E, 0),
+        ]);
+        // The fourth function sits behind the 22-byte index, as the LCT
+        // Premier functions do.
+        reader.functions[3].scan_index = ScanIndex::A(Vec::new());
+        let modes: Vec<_> = reader.functions.iter().map(|f| f.is_centroided()).collect();
+        assert_eq!(modes, [Some(false), Some(false), Some(true), None]);
+        let rec = record_from_scan(
+            &reader,
+            1,
+            DecodedScan {
+                function_index: 4,
+                ..scan_with_precursor(None)
+            },
+        );
+        assert_eq!(rec.scan_mode, None);
     }
 
     /// `_auto.txt` precursor log: one `m/z,time (s)` line per selected
