@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Encoding D scans containing the intensity word `0x20000000` failed with
+  `intensity word 0x20000000 has no mantissa` since 4.0.1, so a default mzML
+  write refused the whole file. The word is flag bit 29 with no mantissa. It
+  now decodes to a point with intensity 0.0. Affected files: PXD053170
+  `20231113_NSE_Sample_High.raw` (302 of 1677 function 1 scans) and
+  `20231113_NSE_Sample_NDS.raw` (282 of 1677); no other bundle in the public
+  corpus contains the word. Every other word still decodes as before, and
+  other mantissa-zero words remain parse errors.
+
 ## [4.0.1] - 2026-11-19
 
 ### Fixed

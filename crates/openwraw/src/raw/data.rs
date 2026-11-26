@@ -115,7 +115,8 @@ fn encoding_d_mz(u: u32) -> crate::Result<f64> {
 /// is always clear and bits 27-31 carry flags that are not interpreted.
 /// Returns `Ok(None)` when the mantissa is zero (no signal) and an error for
 /// a mantissa without its leading bit or a word with bit 21 set, which the
-/// format does not produce.
+/// format does not produce. Whether a mantissa-zero word is an error is the
+/// caller's decision (see `ENC_D_FLAGGED_ZERO`).
 fn decode_intensity_word(word: u32, encoding: &str) -> crate::Result<Option<f32>> {
     let mantissa = word & 0x001f_ffff;
     if mantissa == 0 {
@@ -132,6 +133,16 @@ fn decode_intensity_word(word: u32, encoding: &str) -> crate::Result<Option<f32>
     ))
 }
 
+/// Intensity word with only flag bit 29 set: zero intensity, flagged.
+///
+/// It is the only mantissa-zero word that public Encoding D bundles contain
+/// (PXD053170 `20231113_NSE_Sample_High.raw` and `20231113_NSE_Sample_NDS.raw`,
+/// 764 records; see `ATTRIBUTION.md`). Bit 29 also flags valid intensities,
+/// the flagged points trace the profile peaks, and this word sits inside
+/// those runs where an unflagged zero word also occurs. Other flag-only
+/// words have not been observed, so they stay errors.
+const ENC_D_FLAGGED_ZERO: u32 = 0x2000_0000;
+
 /// Decode one scan slice from an Encoding D `_FUNCnnn.DAT` file.
 ///
 /// Encoding D uses 8-byte records with either index variant (22-byte
@@ -143,10 +154,12 @@ fn decode_intensity_word(word: u32, encoding: &str) -> crate::Result<Option<f32>
 /// smooth peak at m/z 650.97. The `_HEADER.TXT` T1 polynomial applies to sqrt(m/z),
 /// which is proportional to flight time.
 ///
-/// Records with a zero intensity word are skipped. An intensity word with
-/// no mantissa but other bits set, an intensity word the format cannot
-/// produce, and a position word without the leading mantissa bit are errors,
-/// not skipped records.
+/// Records with a zero intensity word are skipped. A flagged zero word (no
+/// mantissa or exponent, only flag bit 29 set; `ENC_D_FLAGGED_ZERO`) decodes
+/// to intensity 0.0 and is kept as a point, like other flagged intensities.
+/// Any other intensity word with no mantissa, an intensity word the format
+/// cannot produce, and a position word without the leading mantissa bit are
+/// errors, not skipped records.
 pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Result<Spectrum> {
     if !scan_bytes.len().is_multiple_of(8) {
         return Err(crate::Error::Parse(format!(
@@ -164,10 +177,14 @@ pub fn decode_encoding_d(scan_bytes: &[u8], params: &DecodeParams) -> crate::Res
         if word == 0 {
             continue;
         }
-        let Some(intensity) = decode_intensity_word(word, "Encoding D")? else {
-            return Err(crate::Error::Parse(format!(
-                "Encoding D: intensity word {word:#010x} has no mantissa"
-            )));
+        let intensity = match decode_intensity_word(word, "Encoding D")? {
+            Some(intensity) => intensity,
+            None if word == ENC_D_FLAGGED_ZERO => 0.0,
+            None => {
+                return Err(crate::Error::Parse(format!(
+                    "Encoding D: intensity word {word:#010x} has no mantissa"
+                )));
+            }
         };
         let position = u32::from_le_bytes([rec[4], rec[5], rec[6], rec[7]]);
         let mz = encoding_d_mz(position)?;
@@ -410,11 +427,35 @@ mod tests {
     }
 
     #[test]
+    fn enc_d_keeps_flag_only_word_as_zero_intensity() {
+        // Records around a flag-only word (bit 29, no mantissa or exponent)
+        // in PXD053170 `20231113_NSE_Sample_High.raw` (Xevo G2-XS), function
+        // 1, scan 91 (counting from 0). The flagged points follow a peak: 4,
+        // 19, (flag only), 297, 787, 54.
+        let scan = bytes_of(&[
+            enc_d_record(0x0000_0000, 0x571e_c8b0),
+            enc_d_record(0x20d0_0000, 0x571e_cbe0),
+            enc_d_record(0x2153_0000, 0x571e_cf08),
+            enc_d_record(0x2000_0000, 0x571e_d230),
+            enc_d_record(0x2252_9000, 0x571e_d558),
+            enc_d_record(0x2298_9800, 0x571e_d880),
+            enc_d_record(0x219b_0000, 0x571e_dba8),
+        ]);
+        let spec = decode_encoding_d(&scan, &test_params()).unwrap();
+        assert_eq!(spec.mz.len(), 6, "the flagged zero point is kept");
+        assert_eq!(spec.intensity, vec![4.0, 19.0, 0.0, 297.0, 787.0, 54.0]);
+        assert!(spec.mz.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
     fn enc_d_rejects_intensity_words_the_format_cannot_produce() {
         for word in [
             0x0000_0001, // mantissa without its leading bit
             0x0030_0000, // bit 21 set
-            0x0400_0000, // flag-only word, no mantissa
+            0x0400_0000, // exponent without a mantissa
+            0x2400_0000, // exponent without a mantissa, flag set
+            0x1000_0000, // flag-only word with a flag other than bit 29
+            0x3000_0000, // flag bit 29 with another flag, no mantissa
             0x0048_0000, // bit 20 clear
         ] {
             let scan = bytes_of(&[enc_d_record(word, 0x5400_0000)]);

@@ -91,7 +91,8 @@ some lock functions); PXD069628 (Xevo G3).
 
 Key facts:
 - No sentinel records; the first and last records are ordinary profile points
-- Zero-intensity records are skipped by the decoder
+- Zero-intensity records are skipped by the decoder; a flagged zero record
+  (`0x20000000`) is kept with intensity 0.0
 
 ### 8-byte Record Layout
 
@@ -116,8 +117,26 @@ intensity = mantissa * 2^(exponent - 21)
 ```
 
 Bit 21 is always clear and bits 27-31 are flags that are not interpreted.
-The decoder returns an error for a nonzero word whose mantissa is zero or
-lacks bit 20, or whose bit 21 is set. An all-zero word is a skipped record.
+The decoder returns an error for a nonzero word whose mantissa lacks bit 20
+or whose bit 21 is set, and for a nonzero word whose mantissa is zero, with
+one exception: `0x20000000` (flag bit 29 only, no mantissa or exponent)
+decodes to intensity 0.0 and is kept as a point. An all-zero word is a
+skipped record.
+
+Flag bit 29 alone is set on valid intensities in 41 of the 206 Encoding D
+and E functions of the public corpus. Where it is set, the flagged points sit
+on the sides and apex of profile peaks, in runs of consecutive records (two
+to six in the first 150 scans of PXD053170
+`20231113_NSE_Sample_High.raw`). The word `0x20000000` occurs only in
+PXD053170 `20231113_NSE_Sample_High.raw` (419 records in 302 scans) and
+`20231113_NSE_Sample_NDS.raw` (345 records in 282 scans), both function 1.
+Every occurrence has a flagged record next to it, and none is the first or
+last record of a scan. Its neighbours' magnitudes match those around an
+unflagged zero word that also has a flagged neighbour (for two flagged
+neighbours in `20231113_NSE_Sample_High.raw`: median of the larger neighbour
+451 against 241, median of the smaller 20 against 14), so it is read as a
+zero intensity with flag bit 29 set. What the flag means is not known. Other
+flag-only words have not been observed and are errors.
 
 Evidence (public bundle PXD058812 `ITEM_M11_7_His_tag_01.raw`, SYNAPT G2-S,
 function 1): all 816,140 nonzero intensity words have bit 20 set and bit 21
