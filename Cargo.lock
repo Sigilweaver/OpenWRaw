@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "openwraw"
-version = "4.0.1"
+version = "4.0.2"
 dependencies = [
  "log",
  "openmassspec-core",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "openwraw-py"
-version = "4.0.1"
+version = "4.0.2"
 dependencies = [
  "openmassspec-core",
  "openwraw",
