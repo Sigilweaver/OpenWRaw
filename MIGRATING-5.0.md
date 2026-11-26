@@ -38,6 +38,8 @@ ce = energies[0]["value"] if energies else None
 - `openmassspec-core = "4"`.
 - `Encoding::is_centroided()` is now `FunctionEntry::is_centroided()` and
   returns `Option<bool>`.
+- `FunctionEntry` has a new field, `sts_error`, set when the function's STS
+  file exists but does not parse.
 - `ExternFunction` has a new field, `collision_energy_labelled_ev`. The struct
   is `#[non_exhaustive]`, so only code that built one by hand is affected.
 - Records, `WatersSource` and `WriteSummary` are Core 4 types: collision
@@ -53,5 +55,18 @@ Core 4's writer refuses records it used to write. For Waters bundles that is:
 | MS/MS record with a collision energy whose `_extern.inf` section has no `(eV)` label (older Q-Tof bundles) | `unknown_collision_energy_unit` |
 | LCT Premier spectra (no scan mode) | `unknown_scan_mode` |
 
-A chromatogram channel with a NaN sample is refused with no check to allow; use
-`RecordErrorPolicy::Skip` to leave it out.
+A chromatogram sample that decodes to NaN is dropped by the reader and the
+chromatogram carries an `openwraw.nonfinite_samples_dropped` warning, so the
+write succeeds with no check to allow.
+
+## Warnings
+
+Records carry these warnings (mzML `openmassspec: warning <code>` userParams,
+and `rec["warnings"]` in Python):
+
+| Code | On |
+|------|----|
+| `empty_spectrum` | a spectrum with no peaks |
+| `openwraw.collision_energy_unstated` | an MS/MS spectrum from a function with a collision-energy ramp or two collision-energy channels |
+| `openwraw.sts_unreadable` | every spectrum of a function whose `_FUNCnnn.STS` does not parse |
+| `openwraw.nonfinite_samples_dropped` | a chromatogram from which non-finite samples were removed |

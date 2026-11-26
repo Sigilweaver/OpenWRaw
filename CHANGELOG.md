@@ -25,9 +25,17 @@ Migration: [MIGRATING-5.0.md](MIGRATING-5.0.md), and Core's
   `FunctionEntry::is_centroided`, which returns `Option<bool>`.
   `ExternFunction` has a new field `collision_energy_labelled_ev`.
 - The mzML writer refuses what it used to write: a spectrum with no scan
-  mode, a collision energy with no unit, a NaN in a chromatogram. See
-  "Known issues and gaps" in the README for the cases and the Core check names
-  that let them through.
+  mode and a collision energy with no unit. See "Known issues and gaps" in the
+  README for the cases and the Core check names that let them through.
+- A spectrum with no peaks carries the `empty_spectrum` warning (Core's
+  `WarningKind::EmptySpectrum`, which the conformance harness requires) and
+  declares no base peak and no m/z range. 409 of 60,595 spectra in 21 public
+  bundles are empty (for example 144 of 695 in PXD037102 and 89 of 200 in
+  PXD005960).
+- An MS/MS record whose function has a collision-energy ramp or two
+  collision-energy channels carries an `openwraw.collision_energy_unstated`
+  warning, and the ramp bounds are in `extra["openwraw.collision_energy_ramp_ev"]`.
+  22,457 records in the 21 bundles.
 
 ### Fixed
 
@@ -45,6 +53,17 @@ Migration: [MIGRATING-5.0.md](MIGRATING-5.0.md), and Core's
   `openwraw.sts.*`. A single-channel function states its energy in eV when its
   `_extern.inf` section labels a collision energy `(eV)`, and with no unit
   otherwise (PXD010569).
+- A `_CHROnnn.DAT` sample whose time or intensity is not finite is dropped from
+  its chromatogram, and the chromatogram carries an
+  `openwraw.nonfinite_samples_dropped` warning with the number dropped and the
+  index of the first. PXD003126 channel `nBSM Measured Flow Rate A` has one
+  such sample (index 23 of 5,105), so the bundle now converts with all 7
+  chromatograms instead of being refused.
+- A function whose `_FUNCnnn.STS` exists but does not parse no longer loses
+  that fact. `Reader::open` logged a warning and nothing else; every record of
+  the function now carries an `openwraw.sts_unreadable` warning and extra entry
+  with the path and the parse error. `FunctionEntry` has a new field,
+  `sts_error`.
 - Encoding E behind the 22-byte index (LCT Premier) is no longer labelled
   centroid. Its point spacing has not been checked, so the scan mode is
   unknown.
