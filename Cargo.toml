@@ -28,4 +28,4 @@ unsafe_code = "forbid"
 # Core 4.0.0 is not on crates.io yet. Pinned by commit; drop this table and
 # build against the published 4.0.0 before merging.
 [patch.crates-io]
-openmassspec-core = { git = "https://github.com/Sigilweaver/OpenMassSpecCore", rev = "63b2a3010abea9d2bfd7a74c9e9a413b6a1ade39" }
+openmassspec-core = { git = "https://github.com/Sigilweaver/OpenMassSpecCore", rev = "ab7b7f7851cc26e518688d04a144c7fc0c42afd5" }
