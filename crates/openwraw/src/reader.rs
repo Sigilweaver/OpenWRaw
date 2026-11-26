@@ -101,6 +101,11 @@ pub struct FunctionEntry {
     /// per-scan housekeeping values (e.g. collision energy), not the peak
     /// data itself.
     pub sts: Option<FuncSts>,
+    /// Why the function's `_FUNCnnn.STS` file is present but unusable: the
+    /// path and the parse error. `None` when the file parsed or does not
+    /// exist. Every record of the function carries it as a warning, because
+    /// the per-scan values (collision energy, set mass) are then missing.
+    pub sts_error: Option<String>,
 }
 
 impl FunctionEntry {
@@ -223,20 +228,17 @@ impl Reader {
                 }
             };
 
-            let sts = match find_file(&dir, &format!("_FUNC{:03}.STS", info.index))? {
+            let (sts, sts_error) = match find_file(&dir, &format!("_FUNC{:03}.STS", info.index))? {
                 None => {
                     log::debug!("function {}: no STS file", info.index);
-                    None
+                    (None, None)
                 }
                 Some(path) => match FuncSts::from_path(&path) {
-                    Ok(sts) => Some(sts),
+                    Ok(sts) => (Some(sts), None),
                     Err(e) => {
-                        log::warn!(
-                            "function {}: ignoring unreadable {}: {e}",
-                            info.index,
-                            path.display()
-                        );
-                        None
+                        let reason = format!("unreadable {}: {e}", path.display());
+                        log::warn!("function {}: ignoring {reason}", info.index);
+                        (None, Some(reason))
                     }
                 },
             };
@@ -276,6 +278,7 @@ impl Reader {
                 encoding,
                 cal,
                 sts,
+                sts_error,
             });
         }
 
@@ -780,6 +783,7 @@ mod tests {
             encoding,
             cal: FunctionCal::default(),
             sts: None,
+            sts_error: None,
         }
     }
 

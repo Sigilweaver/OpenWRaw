@@ -429,13 +429,46 @@ fn chromatogram_record(
         .map_err(|e| e.with_context(context()))?;
     let points = read_chro_dat(&dat_path).map_err(|e| e.with_context(context()))?;
     let scale = ch.scale_f as f32;
-    let time_sec = points.iter().map(|p| p.rt_min * 60.0).collect();
-    let intensity = points.iter().map(|p| p.value * scale).collect();
-    Ok(
-        msc::ChromatogramRecord::new(index, ch.name.clone(), time_sec, intensity)
-            .with_chromatogram_type(chromatogram_type),
-    )
+    let mut time_sec = Vec::with_capacity(points.len());
+    let mut intensity = Vec::with_capacity(points.len());
+    let mut dropped = 0usize;
+    let mut first_dropped = None;
+    for (i, p) in points.iter().enumerate() {
+        let (t, v) = (p.rt_min * 60.0, p.value * scale);
+        if t.is_finite() && v.is_finite() {
+            time_sec.push(t);
+            intensity.push(v);
+        } else {
+            dropped += 1;
+            first_dropped.get_or_insert(i);
+        }
+    }
+    let mut record = msc::ChromatogramRecord::new(index, ch.name.clone(), time_sec, intensity)
+        .with_chromatogram_type(chromatogram_type);
+    if let Some(first) = first_dropped {
+        log::warn!("{}: dropped {dropped} non-finite sample(s)", context());
+        record = record.with_warning(msc::Warning::other(
+            NONFINITE_SAMPLES_DROPPED,
+            format!(
+                "dropped {dropped} of {} samples whose time or intensity decoded to a \
+                 non-finite value; the first is sample index {first}",
+                points.len()
+            ),
+        ));
+    }
+    Ok(record)
 }
+
+/// Warning code on an MS/MS record whose collision energy the bundle does not
+/// state as one value (a ramp, or two cells).
+const COLLISION_ENERGY_UNSTATED: &str = "openwraw.collision_energy_unstated";
+
+/// Warning code on every record of a function whose `_FUNCnnn.STS` file could
+/// not be parsed, so the per-scan STS values are missing.
+const STS_UNREADABLE: &str = "openwraw.sts_unreadable";
+
+/// Warning code on a chromatogram from which non-finite samples were removed.
+const NONFINITE_SAMPLES_DROPPED: &str = "openwraw.nonfinite_samples_dropped";
 
 /// Collect every decoded scan in a bundle into `openmassspec_core` records.
 pub fn collect_records(reader: &Reader) -> crate::Result<Vec<msc::SpectrumRecord>> {
@@ -470,6 +503,7 @@ pub fn record_from_scan(
         precursor_mz,
     } = scan;
     let (mz, intensity) = (spectrum.mz, spectrum.intensity);
+    let empty = mz.is_empty();
     let (tic, bp_mz, bp_int, low_mz, high_mz) = summarize_arrays(&mz, &intensity);
     let ms_level = reader.ms_level(function_index);
     let ce_statement = collision_energy_statement(reader, function_index);
@@ -498,8 +532,32 @@ pub fn record_from_scan(
     let mut extra = ::std::collections::BTreeMap::new();
     extra.insert("openwraw.function_index".into(), function_index.to_string());
     extra.insert("openwraw.scan_index".into(), scan_idx.to_string());
+    let mut warnings = Vec::new();
     if let (CollisionEnergyStatement::Unstated(reason), true) = (&ce_statement, ms_level >= 2) {
         extra.insert("openwraw.collision_energy_unstated".into(), reason.clone());
+        // A ramp or a two-cell energy is not an entry of `collision_energies`
+        // (Core: one entry is one applied energy). What the bundle holds
+        // stays in `extra` (the ramp bounds, the raw STS channels), and the
+        // warning marks the record so the missing energy is not silent.
+        if let Some((start, end)) = reader
+            .extern_inf
+            .functions
+            .get(&function_index)
+            .and_then(|f| f.collision_energy_ramp_ev)
+        {
+            extra.insert(
+                "openwraw.collision_energy_ramp_ev".into(),
+                format!("{start}-{end}"),
+            );
+        }
+        warnings.push(msc::Warning::other(
+            COLLISION_ENERGY_UNSTATED,
+            reason.clone(),
+        ));
+    }
+    if let Some(reason) = function.and_then(|f| f.sts_error.as_ref()) {
+        extra.insert("openwraw.sts_unreadable".into(), reason.clone());
+        warnings.push(msc::Warning::other(STS_UNREADABLE, reason.clone()));
     }
     if let Some(function) = function {
         if let Some(sts) = &function.sts {
@@ -515,7 +573,7 @@ pub fn record_from_scan(
     }
     // Waters instruments have no FAIMS interface, and ion mobility is not
     // decoded, so the mobility and FAIMS fields stay `None`.
-    msc::SpectrumRecord::new(
+    let mut record = msc::SpectrumRecord::new(
         (scan_counter as usize).saturating_sub(1),
         scan_counter,
         native_id_for(function_index, scan_idx),
@@ -532,7 +590,17 @@ pub fn record_from_scan(
     .with_high_mz(high_mz)
     .with_precursor(precursor)
     .with_peaks(mz, intensity)
-    .with_extra_map(extra)
+    .with_extra_map(extra);
+    for warning in warnings {
+        record = record.with_warning(warning);
+    }
+    if empty {
+        record = record.with_warning(msc::Warning::new(
+            msc::WarningKind::EmptySpectrum,
+            "the scan decoded to no peaks",
+        ));
+    }
+    record
 }
 
 fn summarize_arrays(
@@ -901,6 +969,7 @@ mod tests {
                 encoding,
                 cal: Default::default(),
                 sts: None,
+                sts_error: None,
             })
             .collect();
         Reader {
@@ -1075,6 +1144,14 @@ mod tests {
         assert!(precursor.collision_energies.is_empty());
         let note = &rec.extra["openwraw.collision_energy_unstated"];
         assert!(note.contains("ramp 20 to 40"), "{note}");
+        // The ramp bounds stay on the record and a warning marks it.
+        assert_eq!(rec.extra["openwraw.collision_energy_ramp_ev"], "20-40");
+        let warning = rec
+            .warnings
+            .iter()
+            .find(|w| w.kind.code() == COLLISION_ENERGY_UNSTATED)
+            .expect("collision_energy_unstated warning");
+        assert_eq!(&warning.message, note);
     }
 
     #[test]
@@ -1099,6 +1176,50 @@ mod tests {
         // Both raw channels stay on the record.
         assert_eq!(rec.extra["openwraw.sts.62.Collision Energy"], "4");
         assert_eq!(rec.extra["openwraw.sts.78.Collision Energy2"], "27");
+        assert!(rec
+            .warnings
+            .iter()
+            .any(|w| w.kind.code() == COLLISION_ENERGY_UNSTATED));
+    }
+
+    #[test]
+    fn empty_scan_carries_the_empty_spectrum_warning_and_no_summary() {
+        let reader = reader_with_extern(2, "Lteff 1800\nVeff 7200");
+        let rec = record_from_scan(&reader, 1, scan_with_precursor(None));
+        assert!(rec.mz.is_empty());
+        assert!(rec
+            .warnings
+            .iter()
+            .any(|w| w.kind == msc::WarningKind::EmptySpectrum));
+        assert_eq!(rec.base_peak_mz, None);
+        assert_eq!(rec.base_peak_intensity, None);
+        assert_eq!(rec.low_mz, None);
+        assert_eq!(rec.high_mz, None);
+        // A scan with peaks has no such warning.
+        let mut scan = scan_with_precursor(None);
+        scan.spectrum.mz = vec![100.0];
+        scan.spectrum.intensity = vec![5.0];
+        let rec = record_from_scan(&reader, 1, scan);
+        assert!(!rec
+            .warnings
+            .iter()
+            .any(|w| w.kind == msc::WarningKind::EmptySpectrum));
+    }
+
+    #[test]
+    fn unreadable_sts_is_recorded_on_the_function_records() {
+        let mut reader = reader_with_extern(2, "Lteff 1800\nVeff 7200");
+        reader.functions[1].sts_error = Some("unreadable _FUNC002.STS: truncated".into());
+        let rec = record_from_scan(&reader, 1, msms_scan(15.0));
+        assert_eq!(
+            rec.extra["openwraw.sts_unreadable"],
+            "unreadable _FUNC002.STS: truncated"
+        );
+        assert!(rec.warnings.iter().any(|w| w.kind.code() == STS_UNREADABLE));
+        // A function whose STS parsed has no such entry.
+        reader.functions[1].sts_error = None;
+        let rec = record_from_scan(&reader, 1, msms_scan(15.0));
+        assert!(!rec.extra.contains_key("openwraw.sts_unreadable"));
     }
 
     #[test]
@@ -1403,5 +1524,82 @@ mod tests {
         assert_eq!(rec.intensity, vec![100.0, 200.0]); // scale_f = 1.0
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chromatogram_drops_non_finite_samples_and_flags_the_record() {
+        let dir = std::env::temp_dir().join("openwraw-test-nan-chroms");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_flow_channel(
+            &dir,
+            &[(0.0, 100.0), (0.5, f32::NAN), (1.0, 300.0), (1.5, f32::NAN)],
+        );
+        let records = chromatogram_records_for(&dir);
+        assert_eq!(records.len(), 1);
+        let rec = records[0].as_ref().unwrap();
+        assert_eq!(rec.time_sec, vec![0.0, 60.0]);
+        assert_eq!(rec.intensity, vec![100.0, 300.0]);
+        rec.validate().expect("the remaining samples are finite");
+        let warning = rec
+            .warnings
+            .iter()
+            .find(|w| w.kind.code() == NONFINITE_SAMPLES_DROPPED)
+            .expect("warning on the chromatogram");
+        assert!(
+            warning.message.contains("dropped 2 of 4"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("sample index 1"),
+            "{}",
+            warning.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chromatogram_with_finite_samples_has_no_warning() {
+        let dir = std::env::temp_dir().join("openwraw-test-finite-chroms");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_flow_channel(&dir, &[(0.0, 1.0), (0.5, 2.0)]);
+        let records = chromatogram_records_for(&dir);
+        assert!(records[0].as_ref().unwrap().warnings.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Write a one-channel `_chroms.inf` and `_chro001.dat` into `dir`.
+    fn write_flow_channel(dir: &std::path::Path, points: &[(f32, f32)]) {
+        const RECORD_SIZE: usize = 85;
+        let mut inf = vec![0u8; 128];
+        inf[0..2].copy_from_slice(&128u16.to_le_bytes());
+        inf[2..4].copy_from_slice(&1u16.to_le_bytes());
+        inf[4..6].copy_from_slice(&(RECORD_SIZE as u16).to_le_bytes());
+        inf[6..8].copy_from_slice(&2u16.to_le_bytes());
+        inf[32..38].copy_from_slice(&[1, 0, 2, 0, 0, 0]);
+        inf[38..43].copy_from_slice(b"Flags");
+        inf[64..66].copy_from_slice(&4u16.to_le_bytes());
+        inf[80..86].copy_from_slice(&[2, 0, 5, 0, 4, 0]);
+        inf[86..97].copy_from_slice(b"Description");
+        inf[112..114].copy_from_slice(&81u16.to_le_bytes());
+        let mut r = vec![0u8; RECORD_SIZE];
+        r[0..4].copy_from_slice(&4u32.to_le_bytes());
+        let name = b"BSM Flow Rate A";
+        let cc = b"$CC$,1.0,3,0,0,mL/min";
+        r[4..4 + name.len()].copy_from_slice(name);
+        let cc_start = 4 + name.len() + 1;
+        r[cc_start..cc_start + cc.len()].copy_from_slice(cc);
+        inf.extend(r);
+        std::fs::write(dir.join("_chroms.inf"), &inf).unwrap();
+        let mut bytes = vec![0u8; 128];
+        bytes[0..2].copy_from_slice(&128u16.to_le_bytes());
+        bytes[2..4].copy_from_slice(&1u16.to_le_bytes());
+        bytes[4..6].copy_from_slice(&8u16.to_le_bytes());
+        bytes[6..8].copy_from_slice(&(points.len() as u16).to_le_bytes());
+        for &(rt, val) in points {
+            bytes.extend_from_slice(&rt.to_le_bytes());
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        std::fs::write(dir.join("_chro001.dat"), &bytes).unwrap();
     }
 }
