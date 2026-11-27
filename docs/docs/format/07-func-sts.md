@@ -80,8 +80,9 @@ instrument generation; newer firmware adds channels.
 |-----|------|------|------|-------|
 | 13 | Segment Number | i16 | varies | 0 for normal scans |
 | 52 | Cone | i16 | varies | Cone voltage (V); matches `_extern.inf` Sampling Cone |
-| 62 | Collision Energy | f32 | varies | Per-scan collision energy (eV) |
-| 76/78 | Pusher Frequency / Collision Energy2 | varies | varies | Function-dependent |
+| 62 | Collision Energy | f32 | varies | Per-scan collision energy. The file records no unit. Matches the `_extern.inf` field labelled Trap where it labels a trap and a transfer energy; on ramped functions it holds the start of the ramp (see below) |
+| 76 | Pusher Frequency | varies | varies | Function-dependent |
+| 78 | Collision Energy2 | f32 | varies | Second collision energy. Matches the `_extern.inf` field labelled Transfer where it labels both. Absent from older Q-Tof bundles |
 | 77 | Set Mass | f32 | 3 | Precursor m/z of an MS/MS scan; 0 on MS1, MSe and lock-mass scans |
 | 100 | Reference Scan | u8 | varies | 1 if this scan is a lock-mass reference |
 | 101 | Use lock mass correction | u8 | varies | Boolean |
@@ -154,13 +155,39 @@ precursor m/z of each scan, falling back to the `_extern.inf` `Set Mass`
 (also `None` when 0), and the mzML records write that value as both the
 isolation window target m/z and the selected ion m/z.
 `Reader::open` parses every function's
-`_FUNCnnn.STS` when present (silently `None` if absent or malformed - this
-file is supplementary, not required to decode peak data), and
-`mzml::precursor_info_for` uses it to populate `PrecursorInfo::collision_energy`
-for every MS2 function, including MSe/HDMSe (which has no discrete precursor
-`target_mz` but still reports a real per-scan collision energy) and targeted
-MS/MS (Sigilweaver/OpenWRaw#8, #13), and to populate `PrecursorInfo::activation`
-from the ETD Fragmentation Mode channel: `0` maps to `Activation::CID`,
+`_FUNCnnn.STS` when present. The file is supplementary, not required to decode
+peak data, so neither case fails the open: an absent file leaves
+`FunctionEntry::sts` as `None` with nothing flagged, while a file that is
+present but malformed also leaves `sts` as `None` and sets
+`FunctionEntry::sts_error` to the path and parse error (and logs a warning).
+Every record of that function then carries the `openwraw.sts_unreadable`
+warning and an `openwraw.sts_unreadable` entry in `extra`, because its
+per-scan values (collision energy, set mass) are missing. `mzml::record_from_scan` decides what collision energy the bundle states for
+a function's scans (`mzml::collision_energy_statement`):
+
+- A function whose `_extern.inf` section records a collision-energy ramp has no
+  single energy per scan. The channel holds the start of the ramp: every scan
+  of PXD075602 `DHPR_11257-1.raw` function 2 reads 15.0 for a 15 to 40 eV ramp.
+  No collision energy is stated.
+- A function whose STS file also has "Collision Energy2" (seq 78) has two
+  energies per scan. On the trap and transfer instruments of the public corpus
+  seq 62 matches the `_extern.inf` trap field and seq 78 the transfer field (PXD071342 function 2:
+  4.0 and 27.0 for a 27 to 47 eV transfer ramp; PXD002393 function 2: 16.0
+  and 2.0 for a 16 to 40 eV trap ramp; PXD073126 DDA: 4.0 and 22 to 44 per
+  scan). Nothing in the bundle says which cell fragments the precursor, so no
+  collision energy is stated.
+- Otherwise the "Collision Energy" channel is the energy of each scan
+  (PXD041695, PXD010569). Its unit is eV when the function's `_extern.inf`
+  section labels a collision energy `(eV)`, and unknown otherwise.
+
+When no collision energy is stated for an MS/MS record, the reason is in its
+`extra` map under `openwraw.collision_energy_unstated`, and both raw channels
+stay under `openwraw.sts.62.Collision Energy` and
+`openwraw.sts.78.Collision Energy2`. The record's `<precursor>` still carries
+the precursor m/z and the activation.
+
+`PrecursorInfo::activation` comes from the ETD Fragmentation Mode channel:
+`0` maps to `Activation::CID`,
 non-zero to `Activation::ETD` (Sigilweaver/OpenWRaw#22). Every ETD
 Fragmentation Mode value seen in the repository corpus is `0`; the non-zero
 branch follows directly from this table's documented encoding but has not

@@ -76,23 +76,6 @@ pub enum Encoding {
     E,
 }
 
-impl Encoding {
-    /// Whether this encoding stores centroids rather than profile points.
-    ///
-    /// Encodings A and D store profile data: peaks span runs of points one
-    /// sample apart. Encoding E stores isolated, irregularly spaced points
-    /// (one per peak) in the corpus functions that use it behind the 30-byte
-    /// index; the LCT Premier functions behind the 22-byte index share its
-    /// record layout and are treated the same, which the public corpus has
-    /// not confirmed from their point spacing (`docs/format/04-func-dat.md`).
-    pub fn is_centroided(self) -> bool {
-        match self {
-            Encoding::A | Encoding::D => false,
-            Encoding::E => true,
-        }
-    }
-}
-
 /// One acquisition function's static metadata, ready for decoding.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -118,9 +101,32 @@ pub struct FunctionEntry {
     /// per-scan housekeeping values (e.g. collision energy), not the peak
     /// data itself.
     pub sts: Option<FuncSts>,
+    /// Why the function's `_FUNCnnn.STS` file is present but unusable: the
+    /// path and the parse error. `None` when the file parsed or does not
+    /// exist. Every record of the function carries it as a warning, because
+    /// the per-scan values (collision energy, set mass) are then missing.
+    pub sts_error: Option<String>,
 }
 
 impl FunctionEntry {
+    /// Whether this function's spectra are centroids (`Some(true)`) or
+    /// profile points (`Some(false)`), judged from the record encoding;
+    /// `None` when the encoding does not settle it.
+    ///
+    /// Encodings A and D store profile data: peaks span runs of points one
+    /// sample apart. Encoding E behind the 30-byte index stores isolated,
+    /// irregularly spaced points, one per peak. Encoding E behind the
+    /// 22-byte index (LCT Premier) shares the record layout, but its point
+    /// spacing has not been checked, so the answer is `None`
+    /// (`docs/format/04-func-dat.md`).
+    pub fn is_centroided(&self) -> Option<bool> {
+        match (self.encoding, &self.scan_index) {
+            (Encoding::A | Encoding::D, _) => Some(false),
+            (Encoding::E, ScanIndex::B(_)) => Some(true),
+            (Encoding::E, ScanIndex::A(_)) => None,
+        }
+    }
+
     /// Number of scans in this function.
     pub fn scan_count(&self) -> usize {
         self.scan_index.len()
@@ -222,20 +228,17 @@ impl Reader {
                 }
             };
 
-            let sts = match find_file(&dir, &format!("_FUNC{:03}.STS", info.index))? {
+            let (sts, sts_error) = match find_file(&dir, &format!("_FUNC{:03}.STS", info.index))? {
                 None => {
                     log::debug!("function {}: no STS file", info.index);
-                    None
+                    (None, None)
                 }
                 Some(path) => match FuncSts::from_path(&path) {
-                    Ok(sts) => Some(sts),
+                    Ok(sts) => (Some(sts), None),
                     Err(e) => {
-                        log::warn!(
-                            "function {}: ignoring unreadable {}: {e}",
-                            info.index,
-                            path.display()
-                        );
-                        None
+                        let reason = format!("unreadable {}: {e}", path.display());
+                        log::warn!("function {}: ignoring {reason}", info.index);
+                        (None, Some(reason))
                     }
                 },
             };
@@ -275,6 +278,7 @@ impl Reader {
                 encoding,
                 cal,
                 sts,
+                sts_error,
             });
         }
 
@@ -779,6 +783,7 @@ mod tests {
             encoding,
             cal: FunctionCal::default(),
             sts: None,
+            sts_error: None,
         }
     }
 

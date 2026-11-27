@@ -134,6 +134,24 @@ def test_repr(raw_bundle):
     assert "RawReader(" in repr(r)
 
 
+def test_record_dict_keys(raw_bundle):
+    r = openwraw.RawReader(str(raw_bundle))
+    first = next(f for f in r.functions if not f.is_lock_mass)
+    record = r.read_record(first.index, 0)
+    assert isinstance(record["retention_time_sec"], float)
+    assert record["analyzer"] == "tof"
+    assert record["scan_mode"] in ("profile", "centroid", None)
+    assert record["polarity"] in ("positive", "negative", None)
+    for removed in ("collision_energy", "ce_is_nce", "scan_window"):
+        assert removed not in record
+    assert "scan_windows" not in record  # the reader records no scan window
+    assert isinstance(record["extra"], dict)
+    assert record["reported_total_ion_current"] is None or isinstance(
+        record["reported_total_ion_current"], float
+    )
+    assert r.run_info()["time_axis"] == "retention_time"
+
+
 def test_canonical_records_and_decoded_metadata(raw_bundle):
     r = openwraw.RawReader(str(raw_bundle))
     run = r.run_info()

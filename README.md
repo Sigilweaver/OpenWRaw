@@ -107,9 +107,45 @@ quickstart, guide, and format specification.
   reading rests on the neighbouring records in two public bundles
   (PXD053170), not on a documented meaning of the flag. Encoding E has not
   been observed with that word.
-- **Encoding E** (12-byte records): the auxiliary word is not interpreted. Encoding E spectra are
-  labelled centroid. That is confirmed from point spacing for the Xevo
-  G2-XS lock-mass functions but not for LCT Premier bundles.
+- **Encoding E** (12-byte records): the auxiliary word is not interpreted.
+  Encoding E spectra behind the 30-byte index are labelled centroid, which
+  point spacing confirms for the Xevo G2-XS lock-mass functions. LCT Premier
+  bundles (Encoding E behind the 22-byte index) have no scan mode, because
+  their point spacing has not been checked. The mzML writer refuses their
+  spectra unless the `unknown_scan_mode` check is allowed
+  (`WriteOptions::with_leniency`; `--allow unknown_scan_mode` on the
+  OpenMassSpec command line).
+- **Collision energy is written only when the bundle states one per scan.**
+  `_FUNCnnn.STS` has a "Collision Energy" channel and, on trap and transfer
+  instruments, a "Collision Energy2" channel, and records no unit. A function
+  with a collision-energy ramp in `_extern.inf` (MSe and HDMSe high-energy
+  functions, some DDA functions) stores only the ramp start in the channel,
+  and a function with two channels has two energies with no statement of which
+  cell fragments the precursor. Both cases get no collision energy (a ramp is
+  not an entry of `collision_energies`). The record carries an
+  `openwraw.collision_energy_unstated` warning, the reason in the
+  `openwraw.collision_energy_unstated` extra entry, the ramp bounds in
+  `openwraw.collision_energy_ramp_ev`, and the raw channels under
+  `openwraw.sts.*`.
+- **Collision energy unit.** A single-channel function's energy is in eV when
+  its `_extern.inf` section labels a collision energy `(eV)`. Older Q-Tof
+  sections (PXD010569) say only `Collision Energy 10.0`; their MS/MS
+  spectra carry the energy with no unit, and the mzML writer refuses them
+  unless the `unknown_collision_energy_unit` check is allowed
+  (`--allow unknown_collision_energy_unit`).
+- **Chromatogram channels with a NaN sample.** A `_CHROnnn.DAT` sample whose
+  time or intensity is not finite (PXD003126, channel
+  `nBSM Measured Flow Rate A`, one sample) is left out of the chromatogram,
+  time and intensity together. The chromatogram carries an
+  `openwraw.nonfinite_samples_dropped` warning that gives the number dropped
+  and the index of the first, so the mzML writes and the loss is visible.
+- **Unreadable `_FUNCnnn.STS`.** A function whose STS file exists but does
+  not parse still decodes its peaks. Without the STS table its records have no
+  per-scan precursor m/z or collision energy, and each carries an
+  `openwraw.sts_unreadable` warning and extra entry with the path and the parse
+  error. The same text is logged once at `warn` level when the bundle opens.
+- **Empty scans.** A scan that decodes to no peaks is written with the
+  `empty_spectrum` warning and no base peak or m/z range.
 - **Tested instruments.** The public test corpus covers Q-Tof, SYNAPT, Vion,
   Cyclic IMS and Xevo G2-XS/G3 QTof data in positive mode, including MSe,
   HDMSe, DDA, targeted MS/MS and one MALDI MS/MS bundle. Triple and single

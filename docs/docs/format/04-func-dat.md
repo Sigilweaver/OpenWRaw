@@ -254,14 +254,14 @@ conformance check. Neither limitation is corrected by Encoding E.
 
 ## Profile or centroid
 
-Spectra are labelled per encoding, from the spacing of the stored points:
+Spectra are labelled per encoding (`FunctionEntry::is_centroided`), from the spacing of the stored points:
 
 | Encoding | Label | Evidence |
 |----------|-------|----------|
 | A | profile | Peaks are runs of consecutive points one sample apart, for example PXD058812 `molecular_mass_P15_01.raw` scan 98: about 90 points at 0.009 Da steps from 600.68 to 601.47 tracing two isotope peaks |
 | D | profile | Consecutive points are one ADC sample apart (see the Encoding D validation); in 30-byte-index functions 51-99% of consecutive steps are a single sample, and a lock-mass peak spans several points (PXD068881: 556.244, 556.254, 556.264, 556.275, 556.285) |
 | E behind the 30-byte index | centroid | One point per peak at irregular spacing: in PXD053170 `20231113_NSE_Sample_High.raw` function 2, leucine enkephalin and its isotopes are single points at 556.159, 557.162 and 558.163 (uncalibrated), with neighbours 0.03-0.1 Da away; only 21-26% of steps are a single sample |
-| E behind the 22-byte index (LCT Premier) | centroid | Same record layout as above. The point spacing of these functions has not been checked; the LCT bundles are not in the public corpus used here |
+| E behind the 22-byte index (LCT Premier) | unknown | Same record layout as above. The point spacing of these functions has not been checked; the LCT bundles are not in the public corpus used here, so `FunctionEntry::is_centroided` returns `None` and the record has no scan mode |
 
 `_extern.inf` `Data Format` reads `Continuum` for every function that declares
 it, including the Encoding E lock-mass functions above, so it is not used.

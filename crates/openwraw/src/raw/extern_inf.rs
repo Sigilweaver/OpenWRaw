@@ -110,6 +110,14 @@ pub struct ExternFunction {
     /// whose section header says `TOF MS FUNCTION` (see
     /// [`crate::Reader::ms_level`]).
     pub collision_energy_ramp_ev: Option<(f64, f64)>,
+    /// Whether this function's section states a collision energy in
+    /// electronvolts: a field whose label contains `Collision Energy` and
+    /// `(eV)`, such as `Using Auto Trap Collision Energy (eV)`. The
+    /// `_FUNCnnn.STS` collision-energy channels carry no unit; this label is
+    /// the bundle's own statement of it. `false` for sections whose
+    /// collision-energy fields have no unit in their label, and for bundles
+    /// without a section for the function.
+    pub collision_energy_labelled_ev: bool,
 }
 
 /// Parsed contents of a Waters `_extern.inf` file.
@@ -202,6 +210,7 @@ impl std::str::FromStr for ExternInf {
                         mode,
                         set_mass_da: None,
                         collision_energy_ramp_ev: None,
+                        collision_energy_labelled_ev: false,
                     });
                 }
                 continue;
@@ -215,6 +224,15 @@ impl std::str::FromStr for ExternInf {
                     current_func = None;
                 }
                 continue;
+            }
+
+            // A collision-energy field whose label names its unit.
+            if let Some(n) = current_func {
+                if trimmed.contains("Collision Energy") && trimmed.contains("(eV)") {
+                    if let Some(f) = functions.get_mut(&n) {
+                        f.collision_energy_labelled_ev = true;
+                    }
+                }
             }
 
             // `Using Auto Transfer MS Collision Energy (eV)  15.0000 (Ramping to 25.0000)`
@@ -611,6 +629,27 @@ MSMS End Mass\t2000.0\r\n\
         assert_eq!(ramp(3), Some((15.0, 25.0)));
         assert_eq!(ramp(4), Some((25.0, 55.0)));
         assert_eq!(ramp(5), None, "0 to 0 eV is no ramp");
+    }
+
+    #[test]
+    fn collision_energy_unit_label() {
+        let ext: ExternInf = "Lteff 1800\nVeff 7200\n\
+             Function Parameters - Function 1 - TOF MS FUNCTION\n\
+             Using Auto Trap Collision Energy (eV)\t4.000000\n\
+             Function Parameters - Function 2 - TOF MSMS FUNCTION\n\
+             Collision Energy\t10.0\n\
+             Parent Survey Low CE (V)\t10.0\n\
+             Function Parameters - Function 3 - TOF MSMS FUNCTION\n\
+             Transfer MS Collision Energy Low (eV)\t20.0\n"
+            .parse()
+            .unwrap();
+        let labelled = |n: u32| ext.functions[&n].collision_energy_labelled_ev;
+        assert!(labelled(1));
+        assert!(
+            !labelled(2),
+            "no unit in the label, and CE (V) is not a collision energy"
+        );
+        assert!(labelled(3));
     }
 
     #[test]
