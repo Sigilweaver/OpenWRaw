@@ -155,9 +155,14 @@ precursor m/z of each scan, falling back to the `_extern.inf` `Set Mass`
 (also `None` when 0), and the mzML records write that value as both the
 isolation window target m/z and the selected ion m/z.
 `Reader::open` parses every function's
-`_FUNCnnn.STS` when present (silently `None` if absent or malformed - this
-file is supplementary, not required to decode peak data), and
-`mzml::record_from_scan` decides what collision energy the bundle states for
+`_FUNCnnn.STS` when present. The file is supplementary, not required to decode
+peak data, so neither case fails the open: an absent file leaves
+`FunctionEntry::sts` as `None` with nothing flagged, while a file that is
+present but malformed also leaves `sts` as `None` and sets
+`FunctionEntry::sts_error` to the path and parse error (and logs a warning).
+Every record of that function then carries the `openwraw.sts_unreadable`
+warning and an `openwraw.sts_unreadable` entry in `extra`, because its
+per-scan values (collision energy, set mass) are missing. `mzml::record_from_scan` decides what collision energy the bundle states for
 a function's scans (`mzml::collision_energy_statement`):
 
 - A function whose `_extern.inf` section records a collision-energy ramp has no
